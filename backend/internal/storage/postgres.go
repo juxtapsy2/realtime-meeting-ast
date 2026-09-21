@@ -1,0 +1,106 @@
+package storage
+
+import (
+	"database/sql"
+	"fmt"
+
+	_ "github.com/lib/pq"
+)
+
+type Postgres struct {
+	db *sql.DB
+}
+
+func NewPostgres(databaseURL string) (*Postgres, error) {
+	db, err := sql.Open("postgres", databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return &Postgres{db: db}, nil
+}
+
+func (p *Postgres) Close() error {
+	return p.db.Close()
+}
+
+func (p *Postgres) DB() *sql.DB {
+	return p.db
+}
+
+func (p *Postgres) Migrate() error {
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS meetings (
+			id SERIAL PRIMARY KEY,
+			title VARCHAR(255) NOT NULL,
+			project_id INTEGER,
+			status VARCHAR(50) NOT NULL DEFAULT 'pending',
+			started_at TIMESTAMP,
+			ended_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS transcript_segments (
+			id SERIAL PRIMARY KEY,
+			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+			segment_id VARCHAR(255) NOT NULL,
+			speaker_id VARCHAR(255),
+			text TEXT NOT NULL,
+			start_time DECIMAL(10,3),
+			end_time DECIMAL(10,3),
+			confidence DECIMAL(5,4),
+			is_final BOOLEAN DEFAULT false,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(meeting_id, segment_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS decisions (
+			id SERIAL PRIMARY KEY,
+			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			status VARCHAR(50) DEFAULT 'proposed',
+			confidence DECIMAL(5,4),
+			source_segment_ids INTEGER[],
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS action_items (
+			id SERIAL PRIMARY KEY,
+			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+			description TEXT NOT NULL,
+			assignee VARCHAR(255),
+			due_date TIMESTAMP,
+			status VARCHAR(50) DEFAULT 'pending',
+			source_segment_ids INTEGER[],
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS issues (
+			id SERIAL PRIMARY KEY,
+			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			status VARCHAR(50) DEFAULT 'open',
+			source_segment_ids INTEGER[],
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS questions (
+			id SERIAL PRIMARY KEY,
+			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+			question TEXT NOT NULL,
+			status VARCHAR(50) DEFAULT 'open',
+			source_segment_ids INTEGER[],
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+
+	for _, m := range migrations {
+		if _, err := p.db.Exec(m); err != nil {
+			return fmt.Errorf("failed to run migration: %w", err)
+		}
+	}
+
+	return nil
+}
