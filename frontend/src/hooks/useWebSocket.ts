@@ -24,6 +24,24 @@ export function useWebSocket({
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Store callbacks in refs to avoid re-creating WebSocket on every render
+  const callbacksRef = useRef({
+    onTranscriptPartial,
+    onTranscriptFinal,
+    onMeetingStarted,
+    onMeetingEnded,
+    onStateUpdate,
+    onError,
+  });
+  callbacksRef.current = {
+    onTranscriptPartial,
+    onTranscriptFinal,
+    onMeetingStarted,
+    onMeetingEnded,
+    onStateUpdate,
+    onError,
+  };
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -43,22 +61,23 @@ export function useWebSocket({
     ws.onmessage = (event) => {
       try {
         const data: WebSocketEvent = JSON.parse(event.data);
+        const cbs = callbacksRef.current;
 
         switch (data.type) {
           case 'transcript.partial':
-            onTranscriptPartial?.(data.data);
+            cbs.onTranscriptPartial?.(data.data);
             break;
           case 'transcript.final':
-            onTranscriptFinal?.(data.data);
+            cbs.onTranscriptFinal?.(data.data);
             break;
           case 'meeting.started':
-            onMeetingStarted?.(data.data);
+            cbs.onMeetingStarted?.(data.data);
             break;
           case 'meeting.ended':
-            onMeetingEnded?.(data.data);
+            cbs.onMeetingEnded?.(data.data);
             break;
           case 'state.updated':
-            onStateUpdate?.(data.data);
+            cbs.onStateUpdate?.(data.data);
             break;
           default:
             console.log('Unknown event type:', data.type);
@@ -71,7 +90,7 @@ export function useWebSocket({
     ws.onerror = (event) => {
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
-      onError?.(event);
+      callbacksRef.current.onError?.(event);
     };
 
     ws.onclose = () => {
@@ -81,7 +100,7 @@ export function useWebSocket({
     };
 
     wsRef.current = ws;
-  }, [meetingId, onTranscriptPartial, onTranscriptFinal, onMeetingStarted, onMeetingEnded, onStateUpdate, onError]);
+  }, [meetingId]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -96,23 +115,22 @@ export function useWebSocket({
     }
   }, []);
 
-  const sendCommand = useCallback((type: string, data?: any) => {
+  const sendCommand = useCallback((type: string, data?: Record<string, unknown>) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type, ...data }));
     }
   }, []);
 
   useEffect(() => {
+    connect();
     return () => {
       disconnect();
     };
-  }, [disconnect]);
+  }, [connect, disconnect]);
 
   return {
     isConnected,
     error,
-    connect,
-    disconnect,
     sendAudio,
     sendCommand,
   };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Meeting, TranscriptEvent, MeetingState } from '../../types';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useMicrophone } from '../../hooks/useMicrophone';
@@ -47,7 +47,7 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
     }));
   }, []);
 
-  const { isConnected, connect, disconnect, sendAudio, sendCommand } = useWebSocket({
+  const { isConnected, sendAudio, sendCommand } = useWebSocket({
     meetingId: meeting.id,
     onTranscriptPartial: handleTranscriptPartial,
     onTranscriptFinal: handleTranscriptFinal,
@@ -63,13 +63,6 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
   const { isActive: isMicActive, start: startMic, stop: stopMic } = useMicrophone({
     onAudioData: handleAudioData,
   });
-
-  useEffect(() => {
-    connect();
-    return () => {
-      disconnect();
-    };
-  }, [connect, disconnect]);
 
   const handleStartMeeting = () => {
     sendCommand('start_meeting', { meeting_id: meeting.id });
