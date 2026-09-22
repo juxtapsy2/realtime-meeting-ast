@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
 	"github.com/user/realtime-meeting-ast/backend/internal/realtime"
 	"github.com/user/realtime-meeting-ast/backend/internal/storage"
@@ -16,51 +18,62 @@ import (
 )
 
 func main() {
-	// Load configuration from environment
+	// Load .env file if present (check multiple locations for monorepo layout)
+	loaded := false
+	for _, path := range []string{".env", "../.env", "../../.env"} {
+		if err := godotenv.Load(path); err == nil {
+			loaded = true
+			log.Printf("Loaded .env from %s", path)
+			break
+		}
+	}
+	if !loaded {
+		log.Println("No .env file found, using environment variables")
+	}
+
 	cfg := loadConfig()
 
-	// Initialize storage
 	db, err := storage.NewPostgres(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
-	// Run migrations
 	if err := db.Migrate(); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
-	// Initialize repositories
-	meetingRepo := meetings.NewRepository(db)
+	meetingRepo := meetings.NewRepository(db.DB())
 
-	// Initialize STT provider
-	sttProvider, err := transcription.NewProvider(cfg.STTProvider, cfg.STTAPIKey)
+	sttProvider, err := transcription.NewProvider(transcription.Provider(cfg.STTProvider), cfg.STTAPIKey)
 	if err != nil {
 		log.Fatalf("Failed to initialize STT provider: %v", err)
 	}
 
-	// Initialize realtime hub
+	var intelProvider intelligence.IntelligenceProvider
+	if cfg.LLMAPIKey != "" {
+		intelProvider, err = intelligence.NewProvider(intelligence.Provider(cfg.LLMProvider), cfg.LLMAPIKey)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
+			log.Println("Intelligence features will be disabled")
+		}
+	}
+
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	// Initialize meeting service
-	meetingService := meetings.NewService(meetingRepo, hub, sttProvider)
+	meetingService := meetings.NewService(meetingRepo, hub, sttProvider, intelProvider)
 
-	// Setup HTTP routes
 	mux := http.NewServeMux()
 
-	// REST API
 	mux.HandleFunc("/api/meetings", handleMeetings(meetingService))
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
+	mux.HandleFunc("/api/transcript/", handleTranscript(meetingService))
 
-	// WebSocket endpoint
 	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService))
 
-	// CORS middleware
 	handler := corsMiddleware(mux)
 
-	// Create server
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,
@@ -69,7 +82,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server
 	go func() {
 		log.Printf("Server starting on port %s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -77,7 +89,6 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -98,14 +109,24 @@ type Config struct {
 	DatabaseURL string
 	STTProvider string
 	STTAPIKey   string
+	LLMProvider string
+	LLMAPIKey   string
 }
 
 func loadConfig() Config {
+	// Fallback: if DATABASE_URL still empty, try reading .env manually
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://postgres:postgres@127.0.0.1:5432/meeting_ast?sslmode=disable"
+	}
+
 	return Config{
 		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://localhost:5432/meeting_ast?sslmode=disable"),
+		DatabaseURL: dbURL,
 		STTProvider: getEnv("STT_PROVIDER", "deepgram"),
 		STTAPIKey:   os.Getenv("STT_API_KEY"),
+		LLMProvider: getEnv("LLM_PROVIDER", "openai"),
+		LLMAPIKey:   os.Getenv("LLM_API_KEY"),
 	}
 }
 
@@ -156,6 +177,16 @@ func handleMeetingByID(svc *meetings.Service) http.HandlerFunc {
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+func handleTranscript(svc *meetings.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		svc.GetTranscript(w, r)
 	}
 }
 

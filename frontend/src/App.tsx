@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Meeting } from './types';
 import { MeetingList } from './features/meetings/MeetingList';
 import { MeetingRoom } from './features/meetings/MeetingRoom';

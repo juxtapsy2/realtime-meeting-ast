@@ -88,7 +88,13 @@ func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
 }
 
-func (h *Hub) BroadcastToMeeting(meetingID int, event Event) {
+// BroadcastToMeeting sends an event to all clients in a meeting (implements meetings.Broadcaster)
+func (h *Hub) BroadcastToMeeting(meetingID int, eventType string, data interface{}) {
+	event := Event{
+		Type: eventType,
+		Data: data,
+	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("Error marshaling event: %v", err)
@@ -101,7 +107,7 @@ func (h *Hub) BroadcastToMeeting(meetingID int, event Event) {
 	if clients, ok := h.meetings[meetingID]; ok {
 		for client := range clients {
 			select {
-			case client.Send <- data:
+			case client.Send <- data.([]byte):
 			default:
 				log.Printf("Failed to send to client in meeting %d", meetingID)
 			}
@@ -109,12 +115,17 @@ func (h *Hub) BroadcastToMeeting(meetingID int, event Event) {
 	}
 }
 
-func (h *Hub) BroadcastToAll(event Event) {
-	data, err := json.Marshal(event)
+func (h *Hub) BroadcastToAll(eventType string, data interface{}) {
+	event := Event{
+		Type: eventType,
+		Data: data,
+	}
+
+	dataBytes, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("Error marshaling event: %v", err)
 		return
 	}
 
-	h.broadcast <- data
+	h.broadcast <- dataBytes
 }

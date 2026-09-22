@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { MeetingState, Decision, ActionItem, Issue, OpenQuestion } from '../../types';
 
 interface IntelligencePanelProps {

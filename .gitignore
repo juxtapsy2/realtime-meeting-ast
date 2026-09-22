@@ -43,3 +43,9 @@ npm-debug.log*
 
 # Docker
 docker-compose.override.yml
+
+# Binary
+*.bin
+bin/
+/bin/
+backend/server

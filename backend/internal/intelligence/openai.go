@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -189,12 +189,7 @@ func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStat
 	var patch MeetingStatePatch
 
 	// Try to extract JSON from the response
-	var jsonStr string
-	if start := len("```json\n"); end := len(response) - len("\n```"); start < end {
-		jsonStr = response[start:end]
-	} else {
-		jsonStr = response
-	}
+	jsonStr := extractJSON(response)
 
 	if err := json.Unmarshal([]byte(jsonStr), &patch); err != nil {
 		return MeetingStatePatch{}, fmt.Errorf("failed to parse JSON: %w", err)
@@ -234,16 +229,26 @@ func (o *OpenAIIntelligence) parseFinalizationResponse(response string) (Meeting
 	var summary MeetingSummary
 
 	// Try to extract JSON from the response
-	var jsonStr string
-	if start := len("```json\n"); end := len(response) - len("\n```"); start < end {
-		jsonStr = response[start:end]
-	} else {
-		jsonStr = response
-	}
+	jsonStr := extractJSON(response)
 
 	if err := json.Unmarshal([]byte(jsonStr), &summary); err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
 	return summary, nil
+}
+
+func extractJSON(response string) string {
+	// Try to extract JSON from markdown code block
+	startMarker := "```json\n"
+	endMarker := "\n```"
+
+	start := strings.Index(response, startMarker)
+	end := strings.LastIndex(response, endMarker)
+
+	if start >= 0 && end > start {
+		return response[start+len(startMarker) : end]
+	}
+
+	return response
 }

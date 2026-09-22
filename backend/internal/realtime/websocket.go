@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
+	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
+	"github.com/user/realtime-meeting-ast/backend/internal/types"
 	"github.com/user/realtime-meeting-ast/backend/internal/transcription"
 )
 
@@ -18,7 +20,7 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for development
+		return true
 	},
 }
 
@@ -34,33 +36,29 @@ type AudioMessage struct {
 }
 
 type CommandMessage struct {
-	Type    string `json:"type"`
-	MeetingID int  `json:"meeting_id"`
+	Type      string `json:"type"`
+	MeetingID int    `json:"meeting_id"`
 }
 
-func HandleWebSocket(hub *Hub, meetingSvc *meetings.Service, w http.ResponseWriter, r *http.Request) {
-	// Extract meeting ID from URL
+func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request) {
 	meetingID, err := extractMeetingID(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
 		return
 	}
 
-	// Verify meeting exists
 	_, err = meetingSvc.GetMeetingByID(meetingID)
 	if err != nil {
 		http.Error(w, "Meeting not found", http.StatusNotFound)
 		return
 	}
 
-	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 		return
 	}
 
-	// Create client
 	client := &Client{
 		Hub:       hub,
 		Conn:      &Connection{WS: conn, Send: make(chan []byte, 256)},
@@ -69,14 +67,13 @@ func HandleWebSocket(hub *Hub, meetingSvc *meetings.Service, w http.ResponseWrit
 	}
 	client.Conn.Client = client
 
-	// Register client with hub
 	hub.Register(client)
 
-	// Start transcriber for this meeting
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	transcriber, err := transcription.NewProvider(transcription.ProviderDeepgram, "")
+	sttAPIKey := os.Getenv("STT_API_KEY")
+	transcriber, err := transcription.NewProvider(transcription.ProviderDeepgram, sttAPIKey)
 	if err != nil {
 		log.Printf("Failed to create transcriber: %v", err)
 		conn.Close()
@@ -99,19 +96,27 @@ func HandleWebSocket(hub *Hub, meetingSvc *meetings.Service, w http.ResponseWrit
 	}
 	defer transcriber.Close()
 
-	// Start goroutines for reading/writing
+	var intelProvider intelligence.IntelligenceProvider
+	llmAPIKey := os.Getenv("LLM_API_KEY")
+	if llmAPIKey != "" {
+		intelProvider, err = intelligence.NewProvider(intelligence.ProviderOpenAI, llmAPIKey)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
+		}
+	}
+
 	go client.writePump()
 	go client.readPump(transcriber, meetingSvc)
-	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID)
+	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID, intelProvider)
 }
 
-func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc *meetings.Service) {
+func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc MeetingService) {
 	defer func() {
 		c.Hub.Unregister(c)
 		c.Conn.WS.Close()
 	}()
 
-	c.Conn.WS.SetReadLimit(512 * 1024) // 512KB
+	c.Conn.WS.SetReadLimit(512 * 1024)
 	c.Conn.WS.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.Conn.WS.SetPongHandler(func(string) error {
 		c.Conn.WS.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -127,24 +132,20 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc *mee
 			break
 		}
 
-		// Try to parse as command first
 		var cmd CommandMessage
 		if err := json.Unmarshal(message, &cmd); err == nil && cmd.Type != "" {
 			c.handleCommand(cmd, meetingSvc)
 			continue
 		}
 
-		// Try to parse as audio message
 		var audioMsg AudioMessage
 		if err := json.Unmarshal(message, &audioMsg); err == nil && audioMsg.Type == "audio" {
-			// Forward audio to transcriber
 			if err := transcriber.WriteAudio(audioMsg.Payload); err != nil {
 				log.Printf("Error writing audio to transcriber: %v", err)
 			}
 			continue
 		}
 
-		// If it's raw binary data, treat as audio
 		if len(message) > 0 {
 			if err := transcriber.WriteAudio(message); err != nil {
 				log.Printf("Error writing audio to transcriber: %v", err)
@@ -188,32 +189,73 @@ func (c *Client) writePump() {
 	}
 }
 
-func (c *Client) transcriptPump(transcriber transcription.Transcriber, meetingSvc *meetings.Service, hub *Hub, meetingID int) {
+func (c *Client) transcriptPump(
+	transcriber transcription.Transcriber,
+	meetingSvc MeetingService,
+	hub *Hub,
+	meetingID int,
+	intelProvider intelligence.IntelligenceProvider,
+) {
+	var recentTranscript strings.Builder
+	finalSegments := make([]types.TranscriptEvent, 0)
+
 	for event := range transcriber.Events() {
-		// Set meeting ID
 		event.MeetingID = strconv.Itoa(meetingID)
 
-		// Broadcast to all clients in the meeting
-		hub.BroadcastToMeeting(meetingID, Event{
-			Type: func() string {
-				if event.Final {
-					return "transcript.final"
-				}
-				return "transcript.partial"
-			}(),
-			Data: event,
-		})
+		eventType := "transcript.partial"
+		if event.Final {
+			eventType = "transcript.final"
+		}
+		hub.BroadcastToMeeting(meetingID, eventType, event)
 
-		// Persist final transcript segments
 		if event.Final {
 			if err := meetingSvc.SaveTranscriptSegment(meetingID, &event); err != nil {
 				log.Printf("Error saving transcript segment: %v", err)
+			}
+
+			finalSegments = append(finalSegments, event)
+			recentTranscript.WriteString(event.Text)
+			recentTranscript.WriteString(" ")
+
+			if intelProvider != nil && len(finalSegments)%5 == 0 {
+				go c.analyzeChunk(intelProvider, meetingID, recentTranscript.String(), hub)
 			}
 		}
 	}
 }
 
-func (c *Client) handleCommand(cmd CommandMessage, meetingSvc *meetings.Service) {
+func (c *Client) analyzeChunk(
+	provider intelligence.IntelligenceProvider,
+	meetingID int,
+	transcriptChunk string,
+	hub *Hub,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	input := intelligence.AnalysisInput{
+		MeetingID:       strconv.Itoa(meetingID),
+		TranscriptChunk: transcriptChunk,
+		CurrentState: &intelligence.MeetingState{
+			CurrentTopic: "",
+			Topics:       []intelligence.Topic{},
+			Decisions:    []intelligence.Decision{},
+			ActionItems:  []intelligence.ActionItem{},
+			Issues:       []intelligence.Issue{},
+			Questions:    []intelligence.OpenQuestion{},
+		},
+	}
+
+	patch, err := provider.AnalyzeChunk(ctx, input)
+	if err != nil {
+		log.Printf("Error analyzing chunk: %v", err)
+		return
+	}
+
+	hub.BroadcastToMeeting(meetingID, "state.updated", patch)
+}
+
+func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {
 	switch cmd.Type {
 	case "start_meeting":
 		if err := meetingSvc.StartMeeting(cmd.MeetingID); err != nil {

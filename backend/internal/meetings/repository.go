@@ -14,6 +14,10 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}
+
 func (r *Repository) Create(meeting *Meeting) error {
 	query := `
 		INSERT INTO meetings (title, project_id, status, created_at, updated_at)
@@ -171,4 +175,48 @@ func (r *Repository) EndMeeting(id int) error {
 	}
 
 	return nil
+}
+
+func (r *Repository) GetTranscriptSegments(meetingID int) ([]TranscriptSegment, error) {
+	query := `
+		SELECT segment_id, speaker_id, text, start_time, end_time, confidence, is_final
+		FROM transcript_segments
+		WHERE meeting_id = $1
+		ORDER BY start_time ASC`
+
+	rows, err := r.db.Query(query, meetingID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transcript segments: %w", err)
+	}
+	defer rows.Close()
+
+	var segments []TranscriptSegment
+	for rows.Next() {
+		var seg TranscriptSegment
+		err := rows.Scan(
+			&seg.SegmentID,
+			&seg.SpeakerID,
+			&seg.Text,
+			&seg.StartTime,
+			&seg.EndTime,
+			&seg.Confidence,
+			&seg.IsFinal,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan transcript segment: %w", err)
+		}
+		segments = append(segments, seg)
+	}
+
+	return segments, nil
+}
+
+type TranscriptSegment struct {
+	SegmentID  string
+	SpeakerID  *string
+	Text       string
+	StartTime  float64
+	EndTime    float64
+	Confidence *float64
+	IsFinal    bool
 }

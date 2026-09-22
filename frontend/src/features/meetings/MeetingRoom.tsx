@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Meeting, TranscriptEvent, MeetingState } from '../../types';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useMicrophone } from '../../hooks/useMicrophone';
