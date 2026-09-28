@@ -167,7 +167,7 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 			},
 		},
 		"temperature": 0.3,
-		"max_tokens":  700,
+		"max_tokens":  1500,
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
