@@ -49,6 +49,7 @@ type googleTranscriber struct {
 	audioCh      chan []byte
 	writeDone    chan struct{}
 	streamCancel context.CancelFunc
+	segCounter   int
 }
 
 func NewGoogleTranscriber(apiKey string) (Transcriber, error) {
@@ -375,7 +376,8 @@ func (g *googleTranscriber) processResult(result *speechpb.StreamingRecognitionR
 	}
 
 	if result.IsFinal {
-		event.SegmentID = fmt.Sprintf("seg_%d", len(g.events))
+		g.segCounter++
+		event.SegmentID = fmt.Sprintf("seg_%d", g.segCounter)
 	}
 
 	select {

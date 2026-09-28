@@ -132,16 +132,16 @@ Final Meeting State:
 Full Transcript:
 %s
 
-Generate a comprehensive meeting summary including:
+Generate a concise meeting summary:
 1. Brief title for the meeting
-2. Executive summary (2-3 paragraphs)
-3. Key points discussed
+2. Short executive summary (2-3 sentences)
+3. Key points (at most 5)
 4. Decisions made
 5. Action items with assignees
 6. Issues raised
 7. Open questions
 
-Format your response as JSON:
+Be concise. Format your response as JSON:
 {
   "title": "string",
   "summary": "string",
@@ -167,7 +167,7 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 			},
 		},
 		"temperature": 0.3,
-		"max_tokens":  2000,
+		"max_tokens":  700,
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
