@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,13 +20,26 @@ import (
 )
 
 func main() {
-	// Load .env file if present (check multiple locations for monorepo layout)
+	// Load .env file if present. Resolution is CWD-relative AND anchored to common
+	// project locations so it works regardless of where the server is launched from.
+	exeDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	cwd, _ := os.Getwd()
+	candidateDirs := []string{cwd, exeDir, filepath.Dir(exeDir)}
+	seen := map[string]bool{}
 	loaded := false
-	for _, path := range []string{".env", "../.env", "../../.env"} {
-		if err := godotenv.Load(path); err == nil {
-			loaded = true
-			log.Printf("Loaded .env from %s", path)
-			break
+	for i := 0; i < len(candidateDirs) && !loaded; i++ {
+		dir := candidateDirs[i]
+		for _, rel := range []string{".env", "../.env", "backend/.env"} {
+			path := filepath.Join(dir, rel)
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			if err := godotenv.Load(path); err == nil {
+				loaded = true
+				log.Printf("Loaded .env from %s", path)
+				break
+			}
 		}
 	}
 	if !loaded {
@@ -45,13 +60,9 @@ func main() {
 
 	meetingRepo := meetings.NewRepository(db.DB())
 
-	sttProvider, err := transcription.NewProvider(transcription.Provider(cfg.STTProvider), cfg.STTAPIKey)
-	if err != nil {
-		log.Fatalf("Failed to initialize STT provider: %v", err)
-	}
-
 	var intelProvider intelligence.IntelligenceProvider
 	if cfg.LLMAPIKey != "" {
+		var err error
 		intelProvider, err = intelligence.NewProvider(intelligence.Provider(cfg.LLMProvider), cfg.LLMAPIKey)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
@@ -59,10 +70,14 @@ func main() {
 		}
 	}
 
+	if cfg.STTAPIKey == "" && cfg.STTProvider != string(transcription.ProviderWhisper) && cfg.STTProvider != string(transcription.ProviderGoogle) {
+		log.Printf("Warning: no API key set for STT provider %q. Transcription will not work.", cfg.STTProvider)
+	}
+
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	meetingService := meetings.NewService(meetingRepo, hub, sttProvider, intelProvider)
+	meetingService := meetings.NewService(meetingRepo, hub, intelProvider)
 
 	mux := http.NewServeMux()
 
@@ -70,7 +85,7 @@ func main() {
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
 	mux.HandleFunc("/api/transcript/", handleTranscript(meetingService))
 
-	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService))
+	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey, cfg.LLMProvider, cfg.LLMAPIKey))
 
 	handler := corsMiddleware(mux)
 
@@ -114,10 +129,12 @@ type Config struct {
 }
 
 func loadConfig() Config {
-	// Fallback: if DATABASE_URL still empty, try reading .env manually
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@127.0.0.1:5432/meeting_ast?sslmode=disable"
+	} else if _, inContainer := os.LookupEnv("KUBERNETES_SERVICE_HOST"); !inContainer && os.Getenv("CONTAINER") == "" {
+		// Running on the host: remap Docker-only service hostnames to localhost.
+		dbURL = strings.Replace(dbURL, "@postgres:", "@127.0.0.1:", 1)
 	}
 
 	return Config{
@@ -190,8 +207,8 @@ func handleTranscript(svc *meetings.Service) http.HandlerFunc {
 	}
 }
 
-func handleWebSocket(hub *realtime.Hub, svc *meetings.Service) http.HandlerFunc {
+func handleWebSocket(hub *realtime.Hub, svc *meetings.Service, sttProvider string, sttAPIKey string, llmProvider string, llmAPIKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, svc, w, r)
+		realtime.HandleWebSocket(hub, svc, w, r, sttProvider, sttAPIKey, llmProvider, llmAPIKey)
 	}
 }

@@ -41,22 +41,13 @@ func (p *Postgres) Migrate() error {
 			status VARCHAR(50) NOT NULL DEFAULT 'pending',
 			started_at TIMESTAMP,
 			ended_at TIMESTAMP,
+			transcript JSONB NOT NULL DEFAULT '[]',
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE TABLE IF NOT EXISTS transcript_segments (
-			id SERIAL PRIMARY KEY,
-			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-			segment_id VARCHAR(255) NOT NULL,
-			speaker_id VARCHAR(255),
-			text TEXT NOT NULL,
-			start_time DECIMAL(10,3),
-			end_time DECIMAL(10,3),
-			confidence DECIMAL(5,4),
-			is_final BOOLEAN DEFAULT false,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(meeting_id, segment_id)
-		)`,
+		`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS transcript JSONB NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS summary JSONB`,
+		`DROP TABLE IF EXISTS transcript_segments`,
 		`CREATE TABLE IF NOT EXISTS decisions (
 			id SERIAL PRIMARY KEY,
 			meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,

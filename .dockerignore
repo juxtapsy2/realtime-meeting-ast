@@ -1,0 +1,6 @@
+.git
+frontend/node_modules
+frontend/dist
+backend/bin
+backend/.env
+*.log

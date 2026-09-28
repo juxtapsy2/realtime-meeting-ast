@@ -2,6 +2,7 @@ package meetings
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -42,11 +43,13 @@ func (r *Repository) Create(meeting *Meeting) error {
 
 func (r *Repository) GetByID(id int) (*Meeting, error) {
 	query := `
-		SELECT id, title, project_id, status, started_at, ended_at, created_at, updated_at
+		SELECT id, title, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
 		FROM meetings
 		WHERE id = $1`
 
 	meeting := &Meeting{}
+	var transcript []byte
+	var summary []byte
 	err := r.db.QueryRow(query, id).Scan(
 		&meeting.ID,
 		&meeting.Title,
@@ -54,10 +57,11 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 		&meeting.Status,
 		&meeting.StartedAt,
 		&meeting.EndedAt,
+		&transcript,
+		&summary,
 		&meeting.CreatedAt,
 		&meeting.UpdatedAt,
 	)
-
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("meeting not found")
 	}
@@ -65,12 +69,16 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 		return nil, fmt.Errorf("failed to get meeting: %w", err)
 	}
 
+	if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
+		return nil, err
+	}
+
 	return meeting, nil
 }
 
 func (r *Repository) List() ([]*Meeting, error) {
 	query := `
-		SELECT id, title, project_id, status, started_at, ended_at, created_at, updated_at
+		SELECT id, title, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
 		FROM meetings
 		ORDER BY created_at DESC`
 
@@ -83,6 +91,8 @@ func (r *Repository) List() ([]*Meeting, error) {
 	var meetings []*Meeting
 	for rows.Next() {
 		meeting := &Meeting{}
+		var transcript []byte
+		var summary []byte
 		err := rows.Scan(
 			&meeting.ID,
 			&meeting.Title,
@@ -90,11 +100,16 @@ func (r *Repository) List() ([]*Meeting, error) {
 			&meeting.Status,
 			&meeting.StartedAt,
 			&meeting.EndedAt,
+			&transcript,
+			&summary,
 			&meeting.CreatedAt,
 			&meeting.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan meeting: %w", err)
+		}
+		if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
+			return nil, fmt.Errorf("failed to parse meeting %d: %w", meeting.ID, err)
 		}
 		meetings = append(meetings, meeting)
 	}
@@ -177,46 +192,53 @@ func (r *Repository) EndMeeting(id int) error {
 	return nil
 }
 
-func (r *Repository) GetTranscriptSegments(meetingID int) ([]TranscriptSegment, error) {
-	query := `
-		SELECT segment_id, speaker_id, text, start_time, end_time, confidence, is_final
-		FROM transcript_segments
-		WHERE meeting_id = $1
-		ORDER BY start_time ASC`
-
-	rows, err := r.db.Query(query, meetingID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transcript segments: %w", err)
-	}
-	defer rows.Close()
-
-	var segments []TranscriptSegment
-	for rows.Next() {
-		var seg TranscriptSegment
-		err := rows.Scan(
-			&seg.SegmentID,
-			&seg.SpeakerID,
-			&seg.Text,
-			&seg.StartTime,
-			&seg.EndTime,
-			&seg.Confidence,
-			&seg.IsFinal,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan transcript segment: %w", err)
+func scanMeetingJSON(meeting *Meeting, transcript []byte, summary []byte) error {
+	if len(transcript) > 0 {
+		if err := json.Unmarshal(transcript, &meeting.Transcript); err != nil {
+			return fmt.Errorf("failed to parse transcript: %w", err)
 		}
-		segments = append(segments, seg)
 	}
-
-	return segments, nil
+	if len(summary) > 0 && string(summary) != "null" {
+		if err := json.Unmarshal(summary, &meeting.Summary); err != nil {
+			return fmt.Errorf("failed to parse summary: %w", err)
+		}
+	}
+	return nil
 }
 
-type TranscriptSegment struct {
-	SegmentID  string
-	SpeakerID  *string
-	Text       string
-	StartTime  float64
-	EndTime    float64
-	Confidence *float64
-	IsFinal    bool
+func (r *Repository) AppendTranscriptSegment(meetingID int, segment []byte) error {
+	query := `
+		UPDATE meetings
+		SET transcript = transcript || $2::jsonb, updated_at = NOW()
+		WHERE id = $1`
+
+	_, err := r.db.Exec(query, meetingID, string(segment))
+	if err != nil {
+		return fmt.Errorf("failed to append transcript segment: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) GetTranscript(meetingID int) ([]byte, error) {
+	query := `SELECT transcript FROM meetings WHERE id = $1`
+
+	var transcript []byte
+	err := r.db.QueryRow(query, meetingID).Scan(&transcript)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transcript: %w", err)
+	}
+	return transcript, nil
+}
+
+func (r *Repository) SaveSummary(meetingID int, summary []byte) error {
+	query := `
+		UPDATE meetings
+		SET summary = $2, updated_at = NOW()
+		WHERE id = $1`
+
+	_, err := r.db.Exec(query, meetingID, string(summary))
+	if err != nil {
+		return fmt.Errorf("failed to save summary: %w", err)
+	}
+	return nil
 }

@@ -191,23 +191,30 @@ type WhisperResponse struct {
 }
 
 func (o *OpenAITranscriber) createWAVHeader(dataSize, sampleRate, channels, bitsPerSample int) []byte {
+	return createWAVHeader(dataSize, sampleRate, channels, bitsPerSample)
+}
+
+func createWAVHeader(dataSize, sampleRate, channels, bitsPerSample int) []byte {
 	byteRate := sampleRate * channels * bitsPerSample / 8
 	blockAlign := channels * bitsPerSample / 8
+	fileSize := 36 + dataSize
 
 	header := make([]byte, 44)
 	copy(header[0:4], "RIFF")
-	copy(header[4:8], []byte{0, 0, 0, 0}) // file size placeholder
+	header[4] = byte(fileSize)
+	header[5] = byte(fileSize >> 8)
 	copy(header[8:12], "WAVE")
 	copy(header[12:16], "fmt ")
 	copy(header[16:20], []byte{16, 0, 0, 0}) // chunk size
-	copy(header[20:22], []byte{1, 0})          // PCM format
-	copy(header[22:24], []byte{byte(0), byte(0)}) // channels
+	copy(header[20:22], []byte{1, 0})        // PCM format
+	header[22] = byte(channels)
 	copy(header[24:28], []byte{byte(sampleRate), byte(sampleRate >> 8), 0, 0})
 	copy(header[28:32], []byte{byte(byteRate), byte(byteRate >> 8), 0, 0})
 	copy(header[32:34], []byte{byte(blockAlign), 0})
 	copy(header[34:36], []byte{byte(bitsPerSample), 0})
 	copy(header[36:40], "data")
-	copy(header[40:44], []byte{byte(dataSize), byte(dataSize >> 8), 0, 0})
+	header[40] = byte(dataSize)
+	header[41] = byte(dataSize >> 8)
 
 	return header
 }

@@ -17,6 +17,7 @@ help:
 	@echo "  make db-up       - Start PostgreSQL with Docker"
 	@echo "  make db-down     - Stop PostgreSQL"
 	@echo "  make db-reset    - Reset database"
+	@echo "  make db-wipe     - Wipe database volume (drop all data)"
 	@echo "  make deps        - Install all dependencies"
 	@echo "  make deps-backend- Install backend dependencies"
 	@echo "  make deps-frontend- Install frontend dependencies"
@@ -95,6 +96,13 @@ db-reset:
 	docker compose up -d postgres
 	@sleep 3
 	cd backend && go run ./cmd/server & sleep 2 && kill %1
+
+db-wipe:
+	@echo "Wiping database volume and restarting postgres..."
+	docker compose down -v
+	docker compose up -d postgres
+	@sleep 3
+	@echo "Database volume wiped. Run 'make dev-backend' to apply migrations."
 
 # Dependencies
 deps: deps-backend deps-frontend

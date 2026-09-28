@@ -42,8 +42,8 @@ export function useMicrophone({
       const source = audioContext.createMediaStreamSource(stream);
 
       // Create script processor for capturing audio data
-      // Buffer size 4096, input channels = channelCount, output channels = 0
-      const processor = audioContext.createScriptProcessor(4096, channelCount, 0);
+      // Buffer size 4096, input channels = channelCount, output channels = 1
+      const processor = audioContext.createScriptProcessor(4096, channelCount, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (event) => {
@@ -61,9 +61,12 @@ export function useMicrophone({
         onAudioData?.(int16Buffer.buffer);
       };
 
-      // Connect nodes
+      // Connect source to processor, processor to a silent gain node (activates processing without playback feedback)
+      const silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      processor.connect(silentGain);
+      silentGain.connect(audioContext.destination);
 
       setIsActive(true);
       setError(null);

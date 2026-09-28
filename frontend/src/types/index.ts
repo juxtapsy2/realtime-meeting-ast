@@ -5,8 +5,20 @@ export interface Meeting {
   status: 'pending' | 'active' | 'completed';
   started_at?: string;
   ended_at?: string;
+  transcript?: TranscriptEvent[];
+  summary?: MeetingSummary;
   created_at: string;
   updated_at: string;
+}
+
+export interface MeetingSummary {
+  title?: string;
+  summary: string;
+  key_points?: string[];
+  decisions?: Array<{ id: string; title: string; description?: string; status: string; confidence: number }>;
+  action_items?: Array<{ id: string; description: string; assignee?: string; status: string }>;
+  issues?: Array<{ id: string; title: string; description?: string; status: string }>;
+  questions?: Array<{ id: string; question: string; status: string }>;
 }
 
 export interface TranscriptEvent {

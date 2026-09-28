@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
-	"github.com/user/realtime-meeting-ast/backend/internal/types"
 	"github.com/user/realtime-meeting-ast/backend/internal/transcription"
+	"github.com/user/realtime-meeting-ast/backend/internal/types"
 )
 
 var upgrader = websocket.Upgrader{
@@ -40,7 +39,7 @@ type CommandMessage struct {
 	MeetingID int    `json:"meeting_id"`
 }
 
-func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request) {
+func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string, llmProvider string, llmAPIKey string) {
 	meetingID, err := extractMeetingID(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
@@ -70,13 +69,14 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 	hub.Register(client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	sttAPIKey := os.Getenv("STT_API_KEY")
-	transcriber, err := transcription.NewProvider(transcription.ProviderDeepgram, sttAPIKey)
+	providerType := transcription.Provider(sttProvider)
+	transcriber, err := transcription.NewProvider(providerType, sttAPIKey)
 	if err != nil {
 		log.Printf("Failed to create transcriber: %v", err)
+		hub.Unregister(client)
 		conn.Close()
+		cancel()
 		return
 	}
 
@@ -91,27 +91,29 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 
 	if err := transcriber.Start(ctx, config); err != nil {
 		log.Printf("Failed to start transcriber: %v", err)
+		hub.Unregister(client)
 		conn.Close()
+		cancel()
 		return
 	}
-	defer transcriber.Close()
 
 	var intelProvider intelligence.IntelligenceProvider
-	llmAPIKey := os.Getenv("LLM_API_KEY")
 	if llmAPIKey != "" {
-		intelProvider, err = intelligence.NewProvider(intelligence.ProviderOpenAI, llmAPIKey)
+		intelProvider, err = intelligence.NewProvider(intelligence.Provider(llmProvider), llmAPIKey)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
 		}
 	}
 
 	go client.writePump()
-	go client.readPump(transcriber, meetingSvc)
+	go client.readPump(transcriber, meetingSvc, cancel)
 	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID, intelProvider)
 }
 
-func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc MeetingService) {
+func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc MeetingService, cancel context.CancelFunc) {
 	defer func() {
+		transcriber.Close()
+		cancel()
 		c.Hub.Unregister(c)
 		c.Conn.WS.Close()
 	}()
@@ -124,12 +126,19 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 	})
 
 	for {
-		_, message, err := c.Conn.WS.ReadMessage()
+		messageType, message, err := c.Conn.WS.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("WebSocket error: %v", err)
 			}
 			break
+		}
+
+		if messageType == websocket.BinaryMessage {
+			if err := transcriber.WriteAudio(message); err != nil {
+				log.Printf("Error writing audio to transcriber: %v", err)
+			}
+			continue
 		}
 
 		var cmd CommandMessage
@@ -144,12 +153,6 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 				log.Printf("Error writing audio to transcriber: %v", err)
 			}
 			continue
-		}
-
-		if len(message) > 0 {
-			if err := transcriber.WriteAudio(message); err != nil {
-				log.Printf("Error writing audio to transcriber: %v", err)
-			}
 		}
 	}
 }

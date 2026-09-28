@@ -40,6 +40,9 @@ type Provider string
 const (
 	ProviderDeepgram Provider = "deepgram"
 	ProviderOpenAI   Provider = "openai"
+	ProviderGroq     Provider = "groq"
+	ProviderWhisper  Provider = "whisper"
+	ProviderGoogle   Provider = "google"
 )
 
 // NewProvider creates a new transcriber based on the provider type
@@ -49,6 +52,12 @@ func NewProvider(providerType Provider, apiKey string) (Transcriber, error) {
 		return NewDeepgramTranscriber(apiKey)
 	case ProviderOpenAI:
 		return NewOpenAITranscriber(apiKey)
+	case ProviderGroq:
+		return NewGroqTranscriber(apiKey)
+	case ProviderWhisper:
+		return NewWhisperTranscriber(apiKey)
+	case ProviderGoogle:
+		return NewGoogleTranscriber(apiKey)
 	default:
 		return NewDeepgramTranscriber(apiKey)
 	}

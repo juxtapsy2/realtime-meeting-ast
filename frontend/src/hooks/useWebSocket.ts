@@ -8,6 +8,7 @@ interface UseWebSocketOptions {
   onMeetingStarted?: (data: any) => void;
   onMeetingEnded?: (data: any) => void;
   onStateUpdate?: (state: Partial<MeetingState>) => void;
+  onMeetingSummary?: (data: any) => void;
   onError?: (error: Event) => void;
 }
 
@@ -18,6 +19,7 @@ export function useWebSocket({
   onMeetingStarted,
   onMeetingEnded,
   onStateUpdate,
+  onMeetingSummary,
   onError,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -31,6 +33,7 @@ export function useWebSocket({
     onMeetingStarted,
     onMeetingEnded,
     onStateUpdate,
+    onMeetingSummary,
     onError,
   });
   callbacksRef.current = {
@@ -39,26 +42,34 @@ export function useWebSocket({
     onMeetingStarted,
     onMeetingEnded,
     onStateUpdate,
+    onMeetingSummary,
     onError,
   };
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
+  useEffect(() => {
+    let cancelled = false;
+
+    // Close any existing connection before opening a new one
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/meeting/${meetingId}`;
 
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
     ws.onopen = () => {
+      if (cancelled) return;
       console.log('WebSocket connected');
       setIsConnected(true);
       setError(null);
     };
 
     ws.onmessage = (event) => {
+      if (cancelled) return;
       try {
         const data: WebSocketEvent = JSON.parse(event.data);
         const cbs = callbacksRef.current;
@@ -79,6 +90,9 @@ export function useWebSocket({
           case 'state.updated':
             cbs.onStateUpdate?.(data.data);
             break;
+          case 'meeting.summary':
+            cbs.onMeetingSummary?.(data.data);
+            break;
           default:
             console.log('Unknown event type:', data.type);
         }
@@ -88,26 +102,25 @@ export function useWebSocket({
     };
 
     ws.onerror = (event) => {
+      if (cancelled) return;
       console.error('WebSocket error:', event);
       setError('WebSocket connection error');
       callbacksRef.current.onError?.(event);
     };
 
     ws.onclose = () => {
+      if (cancelled) return;
       console.log('WebSocket disconnected');
       setIsConnected(false);
       wsRef.current = null;
     };
 
-    wsRef.current = ws;
-  }, [meetingId]);
-
-  const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
+    return () => {
+      cancelled = true;
+      ws.close();
       wsRef.current = null;
-    }
-  }, []);
+    };
+  }, [meetingId]);
 
   const sendAudio = useCallback((audioData: ArrayBuffer) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -120,13 +133,6 @@ export function useWebSocket({
       wsRef.current.send(JSON.stringify({ type, ...data }));
     }
   }, []);
-
-  useEffect(() => {
-    connect();
-    return () => {
-      disconnect();
-    };
-  }, [connect, disconnect]);
 
   return {
     isConnected,

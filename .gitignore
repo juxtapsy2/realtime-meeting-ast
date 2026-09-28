@@ -49,3 +49,6 @@ docker-compose.override.yml
 bin/
 /bin/
 backend/server
+
+# GCP service account (never commit)
+secrets/

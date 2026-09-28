@@ -1,7 +1,10 @@
 package meetings
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,7 +12,6 @@ import (
 
 	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
 	"github.com/user/realtime-meeting-ast/backend/internal/types"
-	"github.com/user/realtime-meeting-ast/backend/internal/transcription"
 )
 
 // Broadcaster is the interface for broadcasting events to connected clients
@@ -20,15 +22,13 @@ type Broadcaster interface {
 type Service struct {
 	repo         *Repository
 	broadcaster  Broadcaster
-	transcriber  transcription.Transcriber
 	intelligence intelligence.IntelligenceProvider
 }
 
-func NewService(repo *Repository, broadcaster Broadcaster, transcriber transcription.Transcriber, intelligence intelligence.IntelligenceProvider) *Service {
+func NewService(repo *Repository, broadcaster Broadcaster, intelligence intelligence.IntelligenceProvider) *Service {
 	return &Service{
 		repo:         repo,
 		broadcaster:  broadcaster,
-		transcriber:  transcriber,
 		intelligence: intelligence,
 	}
 }
@@ -44,10 +44,6 @@ type MeetingResponse struct {
 
 type MeetingsResponse struct {
 	Meetings []*Meeting `json:"meetings"`
-}
-
-type TranscriptResponse struct {
-	Segments []TranscriptSegment `json:"segments"`
 }
 
 func (s *Service) CreateMeeting(w http.ResponseWriter, r *http.Request) {
@@ -156,12 +152,12 @@ func (s *Service) DeleteMeeting(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) StartMeeting(id int) error {
-	meeting, err := s.repo.GetByID(id)
-	if err != nil {
+	if err := s.repo.StartMeeting(id); err != nil {
 		return err
 	}
 
-	if err := s.repo.StartMeeting(id); err != nil {
+	meeting, err := s.repo.GetByID(id)
+	if err != nil {
 		return err
 	}
 
@@ -171,44 +167,103 @@ func (s *Service) StartMeeting(id int) error {
 }
 
 func (s *Service) EndMeeting(id int) error {
+	if err := s.repo.EndMeeting(id); err != nil {
+		return err
+	}
+
 	meeting, err := s.repo.GetByID(id)
 	if err != nil {
 		return err
 	}
 
-	if err := s.repo.EndMeeting(id); err != nil {
-		return err
-	}
-
 	s.broadcaster.BroadcastToMeeting(id, "meeting.ended", meeting)
+
+	if s.intelligence != nil {
+		s.finalizeMeetingAsync(id)
+	}
 
 	return nil
 }
 
-func (s *Service) SaveTranscriptSegment(meetingID int, segment *types.TranscriptEvent) error {
-	query := `
-		INSERT INTO transcript_segments (meeting_id, segment_id, speaker_id, text, start_time, end_time, confidence, is_final, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (meeting_id, segment_id) DO UPDATE
-		SET text = $4, confidence = $7, is_final = $8`
+// finalizeMeetingAsync generates and persists the meeting summary in the
+// background so transcription/client flow is not blocked.
+func (s *Service) finalizeMeetingAsync(meetingID int) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Meeting %d: panic in finalizeMeetingAsync: %v", meetingID, r)
+			}
+		}()
 
-	_, err := s.repo.DB().Exec(query,
-		meetingID,
-		segment.SegmentID,
-		segment.SpeakerID,
-		segment.Text,
-		segment.StartTime,
-		segment.EndTime,
-		segment.Confidence,
-		segment.Final,
-		time.Now(),
-	)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
 
-	return err
+		segments, err := s.GetTranscriptSegments(meetingID)
+		if err != nil {
+			log.Printf("Meeting %d: failed to load transcript for summary: %v", meetingID, err)
+			return
+		}
+
+		parts := make([]string, 0, len(segments))
+		for _, seg := range segments {
+			if strings.TrimSpace(seg.Text) != "" {
+				parts = append(parts, strings.TrimSpace(seg.Text))
+			}
+		}
+		if len(parts) == 0 {
+			return
+		}
+
+		input := intelligence.FinalizationInput{
+			MeetingID:      strconv.Itoa(meetingID),
+			FullTranscript: strings.Join(parts, " "),
+			FinalState:     &intelligence.MeetingState{},
+		}
+
+		summary, err := s.intelligence.FinalizeMeeting(ctx, input)
+		if err != nil {
+			log.Printf("Meeting %d: failed to finalize summary: %v", meetingID, err)
+			return
+		}
+
+		data, err := json.Marshal(summary)
+		if err != nil {
+			log.Printf("Meeting %d: failed to marshal summary: %v", meetingID, err)
+			return
+		}
+
+		if err := s.repo.SaveSummary(meetingID, data); err != nil {
+			log.Printf("Meeting %d: failed to persist summary: %v", meetingID, err)
+			return
+		}
+
+		s.broadcaster.BroadcastToMeeting(meetingID, "meeting.summary", summary)
+		log.Printf("Meeting %d: summary generated and persisted", meetingID)
+	}()
 }
 
-func (s *Service) GetTranscriptSegments(meetingID int) ([]TranscriptSegment, error) {
-	return s.repo.GetTranscriptSegments(meetingID)
+func (s *Service) SaveTranscriptSegment(meetingID int, segment *types.TranscriptEvent) error {
+	data, err := json.Marshal(segment)
+	if err != nil {
+		return fmt.Errorf("failed to marshal transcript segment: %w", err)
+	}
+
+	return s.repo.AppendTranscriptSegment(meetingID, data)
+}
+
+func (s *Service) GetTranscriptSegments(meetingID int) ([]types.TranscriptEvent, error) {
+	data, err := s.repo.GetTranscript(meetingID)
+	if err != nil {
+		return nil, err
+	}
+
+	var segments []types.TranscriptEvent
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &segments); err != nil {
+			return nil, fmt.Errorf("failed to parse transcript: %w", err)
+		}
+	}
+	return segments, nil
 }
 
 func (s *Service) GetTranscript(w http.ResponseWriter, r *http.Request) {
@@ -218,14 +273,14 @@ func (s *Service) GetTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	segments, err := s.repo.GetTranscriptSegments(id)
+	segments, err := s.repo.GetTranscript(id)
 	if err != nil {
 		http.Error(w, "Failed to get transcript", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TranscriptResponse{Segments: segments})
+	w.Write(segments)
 }
 
 func (s *Service) GetMeetingByID(id int) (*types.MeetingInfo, error) {

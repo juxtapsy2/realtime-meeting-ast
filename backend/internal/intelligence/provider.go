@@ -19,27 +19,27 @@ type AnalysisInput struct {
 	TranscriptChunk string                 `json:"transcript_chunk"`
 	RecentContext   string                 `json:"recent_context"`
 	CurrentState    *MeetingState          `json:"current_state"`
-	ProjectContext   map[string]interface{} `json:"project_context,omitempty"`
+	ProjectContext  map[string]interface{} `json:"project_context,omitempty"`
 }
 
 // MeetingStatePatch represents updates to the meeting state
 type MeetingStatePatch struct {
-	CurrentTopic *string          `json:"current_topic,omitempty"`
-	Topics       []Topic          `json:"topics,omitempty"`
-	Decisions    []Decision       `json:"decisions,omitempty"`
-	ActionItems  []ActionItem     `json:"action_items,omitempty"`
-	Issues       []Issue          `json:"issues,omitempty"`
-	Questions    []OpenQuestion   `json:"questions,omitempty"`
+	CurrentTopic *string        `json:"current_topic,omitempty"`
+	Topics       []Topic        `json:"topics,omitempty"`
+	Decisions    []Decision     `json:"decisions,omitempty"`
+	ActionItems  []ActionItem   `json:"action_items,omitempty"`
+	Issues       []Issue        `json:"issues,omitempty"`
+	Questions    []OpenQuestion `json:"questions,omitempty"`
 }
 
 // MeetingState represents the current state of a meeting
 type MeetingState struct {
-	CurrentTopic string          `json:"current_topic"`
-	Topics       []Topic         `json:"topics"`
-	Decisions    []Decision      `json:"decisions"`
-	ActionItems  []ActionItem    `json:"action_items"`
-	Issues       []Issue         `json:"issues"`
-	Questions    []OpenQuestion  `json:"questions"`
+	CurrentTopic string         `json:"current_topic"`
+	Topics       []Topic        `json:"topics"`
+	Decisions    []Decision     `json:"decisions"`
+	ActionItems  []ActionItem   `json:"action_items"`
+	Issues       []Issue        `json:"issues"`
+	Questions    []OpenQuestion `json:"questions"`
 }
 
 // Topic represents a discussion topic
@@ -88,22 +88,22 @@ type OpenQuestion struct {
 
 // FinalizationInput contains data for meeting finalization
 type FinalizationInput struct {
-	MeetingID   string        `json:"meeting_id"`
-	FullTranscript string     `json:"full_transcript"`
-	FinalState  *MeetingState `json:"final_state"`
+	MeetingID      string        `json:"meeting_id"`
+	FullTranscript string        `json:"full_transcript"`
+	FinalState     *MeetingState `json:"final_state"`
 }
 
 // MeetingSummary is the final meeting summary
 type MeetingSummary struct {
-	Title           string        `json:"title"`
-	Summary         string        `json:"summary"`
-	KeyPoints       []string      `json:"key_points"`
-	Decisions       []Decision    `json:"decisions"`
-	ActionItems     []ActionItem  `json:"action_items"`
-	Issues          []Issue       `json:"issues"`
-	Questions       []OpenQuestion `json:"questions"`
-	Participants    []string      `json:"participants,omitempty"`
-	Duration        float64       `json:"duration,omitempty"`
+	Title        string         `json:"title"`
+	Summary      string         `json:"summary"`
+	KeyPoints    []string       `json:"key_points"`
+	Decisions    []Decision     `json:"decisions"`
+	ActionItems  []ActionItem   `json:"action_items"`
+	Issues       []Issue        `json:"issues"`
+	Questions    []OpenQuestion `json:"questions"`
+	Participants []string       `json:"participants,omitempty"`
+	Duration     float64        `json:"duration,omitempty"`
 }
 
 // Provider represents the type of intelligence provider
@@ -111,11 +111,17 @@ type Provider string
 
 const (
 	ProviderOpenAI Provider = "openai"
+	ProviderGemini Provider = "gemini"
+	ProviderGroq   Provider = "groq"
 )
 
 // NewProvider creates a new intelligence provider
 func NewProvider(providerType Provider, apiKey string) (IntelligenceProvider, error) {
 	switch providerType {
+	case ProviderGemini:
+		return NewGeminiIntelligence(apiKey)
+	case ProviderGroq:
+		return NewGroqIntelligence(apiKey)
 	case ProviderOpenAI:
 		return NewOpenAIIntelligence(apiKey)
 	default:

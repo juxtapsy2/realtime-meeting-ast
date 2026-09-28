@@ -14,14 +14,15 @@ import (
 )
 
 type DeepgramTranscriber struct {
-	apiKey     string
-	conn       *websocket.Conn
-	events     chan TranscriptEvent
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	connected  bool
-	config     Config
+	apiKey      string
+	conn        *websocket.Conn
+	events      chan TranscriptEvent
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	connected   bool
+	config      Config
+	audioChunks int
 }
 
 func NewDeepgramTranscriber(apiKey string) (*DeepgramTranscriber, error) {
@@ -61,7 +62,20 @@ func (d *DeepgramTranscriber) Start(ctx context.Context, config Config) error {
 		d.config.Model = config.Model
 	}
 
-	// Build WebSocket URL
+	d.ctx = ctx
+	d.connected = false
+
+	log.Println("Deepgram transcriber initialized (lazy connect)")
+	return nil
+}
+
+func (d *DeepgramTranscriber) ensureConnected() error {
+	if d.connected {
+		return nil
+	}
+
+	log.Println("Deepgram: connecting...")
+
 	u, err := url.Parse("wss://api.deepgram.com/v1/listen")
 	if err != nil {
 		return fmt.Errorf("failed to parse URL: %w", err)
@@ -80,12 +94,10 @@ func (d *DeepgramTranscriber) Start(ctx context.Context, config Config) error {
 	}
 	u.RawQuery = q.Encode()
 
-	// Connect to Deepgram
 	header := http.Header{}
 	header.Set("Authorization", "Token "+d.apiKey)
-	header.Set("X-DG-Properties", `{"detected_language": "en"}`)
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), header)
+	conn, _, err := websocket.DefaultDialer.DialContext(d.ctx, u.String(), header)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Deepgram: %w", err)
 	}
@@ -93,7 +105,6 @@ func (d *DeepgramTranscriber) Start(ctx context.Context, config Config) error {
 	d.conn = conn
 	d.connected = true
 
-	// Start reading responses
 	go d.readResponses()
 
 	log.Println("Connected to Deepgram WebSocket")
@@ -104,9 +115,14 @@ func (d *DeepgramTranscriber) WriteAudio(chunk []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if !d.connected || d.conn == nil {
-		return fmt.Errorf("not connected to Deepgram")
+	if err := d.ensureConnected(); err != nil {
+		return err
 	}
+
+	if d.audioChunks == 0 {
+		log.Printf("Deepgram: first audio chunk received (%d bytes)", len(chunk))
+	}
+	d.audioChunks++
 
 	return d.conn.WriteMessage(websocket.BinaryMessage, chunk)
 }
@@ -139,11 +155,11 @@ func (d *DeepgramTranscriber) readResponses() {
 			_, message, err := d.conn.ReadMessage()
 			if err != nil {
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					log.Println("Deepgram WebSocket closed")
+					log.Println("Deepgram WebSocket closed normally")
 					return
 				}
 				log.Printf("Error reading from Deepgram: %v", err)
-				continue
+				return
 			}
 
 			var response DeepgramResponse

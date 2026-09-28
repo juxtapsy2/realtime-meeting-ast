@@ -4,9 +4,10 @@ import { TranscriptEvent } from '../../types';
 interface TranscriptPanelProps {
   transcript: TranscriptEvent[];
   partialText: string;
+  showEmptyHint?: boolean;
 }
 
-export function TranscriptPanel({ transcript, partialText }: TranscriptPanelProps) {
+export function TranscriptPanel({ transcript, partialText, showEmptyHint = true }: TranscriptPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export function TranscriptPanel({ transcript, partialText }: TranscriptPanelProp
       ref={containerRef}
       className="flex-1 overflow-y-auto p-4 space-y-4"
     >
-      {transcript.length === 0 && !partialText && (
+      {transcript.length === 0 && !partialText && showEmptyHint && (
         <div className="text-center text-gray-500 py-12">
           <p>Waiting for transcript...</p>
           <p className="text-sm mt-2">Start the meeting and enable your microphone</p>

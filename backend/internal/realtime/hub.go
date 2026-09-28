@@ -89,13 +89,13 @@ func (h *Hub) Unregister(client *Client) {
 }
 
 // BroadcastToMeeting sends an event to all clients in a meeting (implements meetings.Broadcaster)
-func (h *Hub) BroadcastToMeeting(meetingID int, eventType string, data interface{}) {
+func (h *Hub) BroadcastToMeeting(meetingID int, eventType string, payload interface{}) {
 	event := Event{
 		Type: eventType,
-		Data: data,
+		Data: payload,
 	}
 
-	data, err := json.Marshal(event)
+	eventData, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("Error marshaling event: %v", err)
 		return
@@ -107,7 +107,7 @@ func (h *Hub) BroadcastToMeeting(meetingID int, eventType string, data interface
 	if clients, ok := h.meetings[meetingID]; ok {
 		for client := range clients {
 			select {
-			case client.Send <- data.([]byte):
+			case client.Send <- eventData:
 			default:
 				log.Printf("Failed to send to client in meeting %d", meetingID)
 			}

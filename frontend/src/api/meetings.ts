@@ -1,4 +1,4 @@
-import { Meeting } from '../types';
+import { Meeting, TranscriptEvent } from '../types';
 
 const API_BASE = '/api';
 
@@ -9,6 +9,14 @@ export async function fetchMeetings(): Promise<Meeting[]> {
   }
   const data = await response.json();
   return data.meetings || [];
+}
+
+export async function fetchTranscript(meetingId: number): Promise<TranscriptEvent[]> {
+  const response = await fetch(`${API_BASE}/transcript/${meetingId}`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch transcript');
+  }
+  return response.json();
 }
 
 export async function fetchMeeting(id: number): Promise<Meeting> {

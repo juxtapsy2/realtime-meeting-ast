@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,18 +15,38 @@ import (
 )
 
 type OpenAIIntelligence struct {
-	apiKey string
-	client *http.Client
+	apiKey  string
+	model   string
+	baseURL string
+	client  *http.Client
 }
 
 func NewOpenAIIntelligence(apiKey string) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.openai.com/v1", "gpt-4o-mini")
+}
+
+// NewGroqIntelligence returns an IntelligenceProvider backed by the Groq API.
+// Groq exposes an OpenAI-compatible chat completions endpoint, so it reuses the
+// same client and parsing as the OpenAI provider.
+func NewGroqIntelligence(apiKey string) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
+}
+
+func newOpenAICompatible(apiKey, baseURL, defaultModel string) (*OpenAIIntelligence, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key is required")
+		return nil, fmt.Errorf("API key is required")
+	}
+
+	model := os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = defaultModel
 	}
 
 	return &OpenAIIntelligence{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 60 * time.Second},
+		apiKey:  apiKey,
+		model:   model,
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -96,6 +117,13 @@ Format your response as JSON:
 }
 
 func (o *OpenAIIntelligence) buildFinalizationPrompt(input FinalizationInput) string {
+	stateJSON := "none"
+	if input.FinalState != nil {
+		if state, err := json.MarshalIndent(input.FinalState, "", "  "); err == nil {
+			stateJSON = string(state)
+		}
+	}
+
 	return fmt.Sprintf(`You are an AI meeting assistant. Generate a final meeting summary based on the complete transcript and final state.
 
 Final Meeting State:
@@ -122,12 +150,12 @@ Format your response as JSON:
   "action_items": [{"id": "uuid", "description": "string", "assignee": "string", "status": "pending"}],
   "issues": [{"id": "uuid", "title": "string", "description": "string", "status": "open"}],
   "questions": [{"id": "uuid", "question": "string", "status": "open"}]
-}`, input.FullTranscript, input.FullTranscript)
+}`, stateJSON, input.FullTranscript)
 }
 
 func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string, error) {
 	requestBody := map[string]interface{}{
-		"model": "gpt-4",
+		"model": o.model,
 		"messages": []map[string]string{
 			{
 				"role":    "system",
@@ -147,7 +175,7 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
@@ -179,7 +207,16 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 	}
 
 	if len(response.Choices) == 0 {
-		return "", fmt.Errorf("no response from LLM")
+		var apiErr struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
+			return "", fmt.Errorf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
+		}
+		return "", fmt.Errorf("no response from LLM (status %s)", resp.Status)
 	}
 
 	return response.Choices[0].Message.Content, nil
