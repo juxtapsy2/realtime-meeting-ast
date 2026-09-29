@@ -52,6 +52,7 @@ type googleTranscriber struct {
 	writeDone    chan struct{}
 	streamCancel context.CancelFunc
 	segCounter   int
+	lastEnd      float64
 }
 
 func NewGoogleTranscriber(apiKey string, vocab Vocabulary) (Transcriber, error) {
@@ -456,10 +457,15 @@ func (g *googleTranscriber) processResult(result *speechpb.StreamingRecognitionR
 	event := TranscriptEvent{
 		SegmentID:  "", // assigned by persistence layer on final
 		Text:       text,
+		StartTime:  g.lastEnd,
 		EndTime:    durationSeconds(result.ResultEndOffset),
 		Confidence: nil,
 		Final:      result.IsFinal,
 	}
+	// Google's streaming API exposes only ResultEndOffset, so a segment's start
+	// is approximated as the end offset of the previous processed result. This
+	// keeps transcript timestamps monotonic instead of all reporting 0.00.
+	g.lastEnd = event.EndTime
 	if alt.Confidence > 0 {
 		conf := float64(alt.Confidence)
 		event.Confidence = &conf
