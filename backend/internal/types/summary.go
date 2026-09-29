@@ -2,8 +2,16 @@ package types
 
 // MeetingSummary is the structured AI summary produced when a meeting ends.
 type MeetingSummary struct {
-	Title     string   `json:"title"`
-	Summary   string   `json:"summary"`
+	Title      string `json:"title"`
+	Summary    string `json:"summary"`
+	MomEntries []struct {
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+		Status   string `json:"status"`
+		Actions  string `json:"actions,omitempty"`
+		Assignee string `json:"assignee,omitempty"`
+		ETA      string `json:"eta,omitempty"`
+	} `json:"mom_entries,omitempty"`
 	KeyPoints []string `json:"key_points,omitempty"`
 	Decisions []struct {
 		ID               string   `json:"id"`

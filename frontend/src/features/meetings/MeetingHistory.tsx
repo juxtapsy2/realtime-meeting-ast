@@ -128,7 +128,7 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
             <h2 className="text-lg font-medium text-gray-900">Meeting Summary</h2>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            {summary ? <SummaryPanel summary={summary} /> : <SummaryPending />}
+            {summary ? <SummaryPanel summary={summary} meeting={meeting} /> : <SummaryPending />}
           </div>
         </div>
       </div>
@@ -136,21 +136,48 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   );
 }
 
-function SummaryPanel({ summary }: { summary: MeetingSummary }) {
+function SummaryPanel({ summary, meeting }: { summary: MeetingSummary; meeting: Meeting }) {
+  const momDate = formatMomDate(new Date(meeting.ended_at || meeting.started_at || Date.now()));
+
   return (
     <div className="space-y-5">
-      {summary.title && (
+      {summary.mom_entries && summary.mom_entries.length > 0 ? (
         <div>
-          <h3 className="text-sm font-medium text-gray-500 mb-1">Title</h3>
-          <p className="text-gray-900 font-medium">{summary.title}</p>
+          <h3 className="text-sm font-medium text-gray-500 mb-1">Minutes of Meeting</h3>
+          <div className="text-sm text-gray-900 whitespace-pre-line font-mono bg-gray-50 border border-gray-200 rounded-lg p-3">
+            {momDate} {summary.title || meeting.title} MOM:
+            {summary.mom_entries.map((entry) => (
+              <span key={entry.id}>
+                {`\n[${entry.id}] ${entry.title}: ${entry.status}.`}
+                {(entry.actions || entry.eta || entry.assignee) && (
+                  <>
+                    {`\n\n  Actions: `}
+                    {[entry.actions, entry.assignee ? `(${entry.assignee})` : null, entry.eta ? `ETA: ${entry.eta}` : null]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </>
+                )}
+                {'\n'}
+              </span>
+            ))}
+          </div>
         </div>
-      )}
+      ) : (
+        <>
+          {summary.title && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Title</h3>
+              <p className="text-gray-900 font-medium">{summary.title}</p>
+            </div>
+          )}
 
-      {summary.summary && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-500 mb-1">Summary</h3>
-          <p className="text-sm text-gray-700 whitespace-pre-line">{summary.summary}</p>
-        </div>
+          {summary.summary && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Summary</h3>
+              <p className="text-sm text-gray-700 whitespace-pre-line">{summary.summary}</p>
+            </div>
+          )}
+        </>
       )}
 
       {summary.key_points && summary.key_points.length > 0 && (
@@ -235,4 +262,11 @@ function SummaryPending() {
       </div>
     </div>
   );
+}
+
+function formatMomDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
 }

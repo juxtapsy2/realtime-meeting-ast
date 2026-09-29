@@ -23,13 +23,15 @@ type Service struct {
 	repo         *Repository
 	broadcaster  Broadcaster
 	intelligence intelligence.IntelligenceProvider
+	glossary     intelligence.Glossary
 }
 
-func NewService(repo *Repository, broadcaster Broadcaster, intelligence intelligence.IntelligenceProvider) *Service {
+func NewService(repo *Repository, broadcaster Broadcaster, intelligence intelligence.IntelligenceProvider, glossary intelligence.Glossary) *Service {
 	return &Service{
 		repo:         repo,
 		broadcaster:  broadcaster,
 		intelligence: intelligence,
+		glossary:     glossary,
 	}
 }
 
@@ -214,10 +216,19 @@ func (s *Service) finalizeMeetingAsync(meetingID int) {
 			return
 		}
 
+		meeting, err := s.repo.GetByID(meetingID)
+		if err != nil {
+			log.Printf("Meeting %d: failed to load meeting for summary: %v", meetingID, err)
+		}
+
 		input := intelligence.FinalizationInput{
 			MeetingID:      strconv.Itoa(meetingID),
 			FullTranscript: strings.Join(parts, " "),
 			FinalState:     &intelligence.MeetingState{},
+			Glossary:       s.glossary,
+		}
+		if meeting != nil {
+			input.Title = meeting.Title
 		}
 
 		summary, err := s.intelligence.FinalizeMeeting(ctx, input)

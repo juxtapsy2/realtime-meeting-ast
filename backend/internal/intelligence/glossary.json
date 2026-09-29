@@ -1,0 +1,136 @@
+{
+  "terms": [
+    {
+      "term": "CR",
+      "aliases": ["CA", "change request", "change requests"],
+      "expansion": "Change Request",
+      "description": "A formal request to change an existing system feature or report."
+    },
+    {
+      "term": "MOM",
+      "aliases": ["mom", "minutes of meeting", "minutes"],
+      "expansion": "Minutes of Meeting",
+      "description": "Meeting notes capturing decisions, current status, and next actions."
+    },
+    {
+      "term": "FSD",
+      "aliases": ["fsd", "func spec doc"],
+      "expansion": "Functional Specification Document",
+      "description": "Document describing functional behavior of a system feature."
+    },
+    {
+      "term": "BRD",
+      "aliases": ["brd", "business requirement doc"],
+      "expansion": "Business Requirements Document",
+      "description": "Document describing business requirements a change must satisfy."
+    },
+    {
+      "term": "SIT",
+      "aliases": ["sit", "system integration test", "system integration testing"],
+      "expansion": "System Integration Testing",
+      "description": "Testing performed on the integrated system before release."
+    },
+    {
+      "term": "ETA",
+      "aliases": ["eta"],
+      "expansion": "Estimated Time of Arrival",
+      "description": "Expected completion date or time window for a task."
+    },
+    {
+      "term": "POSM",
+      "aliases": ["posm"],
+      "expansion": "Point of Sale Material",
+      "description": "Marketing materials displayed at the point of sale."
+    },
+    {
+      "term": "DMS",
+      "aliases": ["dms"],
+      "expansion": "Distribution Management System",
+      "description": "System managing distribution/outlet operations."
+    },
+    {
+      "term": "PACE",
+      "aliases": ["pace"],
+      "expansion": "PACE",
+      "description": "Internal system/product name; keep as-is."
+    },
+    {
+      "term": "AIS",
+      "aliases": ["ais"],
+      "expansion": "AIS",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "Noventiq",
+      "aliases": ["noventiq"],
+      "expansion": "Noventiq",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "Infosys",
+      "aliases": ["infosys", "info sys"],
+      "expansion": "Infosys",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "Vxceed",
+      "aliases": ["vxceed", "Vxceed Technology"],
+      "expansion": "Vxceed",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "Solar",
+      "aliases": ["solar", "sola"],
+      "expansion": "Solar",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "BSG",
+      "aliases": ["bsg"],
+      "expansion": "BSG",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "Coke",
+      "aliases": ["coke", "Coca Cola", "coca-cola", "coca cola"],
+      "expansion": "Coca-Cola",
+      "description": "Customer/brand name; keep as-is."
+    },
+    {
+      "term": "Coca-Cola",
+      "aliases": ["Coca", "Coca Cola", "coca-cola"],
+      "expansion": "Coca-Cola",
+      "description": "Customer/brand name; keep as-is."
+    },
+    {
+      "term": "CCVN",
+      "aliases": ["ccvn", "coca-cola vietnam", "coca cola vietnam"],
+      "expansion": "CCVN",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "GRN",
+      "aliases": ["grn", "goods receipt note"],
+      "expansion": "Goods Receipt Note",
+      "description": "Document confirming receipt of goods."
+    },
+    {
+      "term": "Sales Register",
+      "aliases": ["sales registration", "sales register"],
+      "expansion": "Sales Register",
+      "description": "Report listing sales orders/transactions."
+    },
+    {
+      "term": "Sales Order",
+      "aliases": ["sales orders", "SO"],
+      "expansion": "Sales Order",
+      "description": "Order placed by a customer for goods or services."
+    },
+    {
+      "term": "Delivery Note",
+      "aliases": ["delivery notes", "DN"],
+      "expansion": "Delivery Note",
+      "description": "Document accompanying goods at delivery."
+    }
+  ]
+}

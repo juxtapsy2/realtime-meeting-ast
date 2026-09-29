@@ -14,6 +14,7 @@ export interface Meeting {
 export interface MeetingSummary {
   title?: string;
   summary: string;
+  mom_entries?: Array<{ id: string; title: string; status: string; actions?: string; assignee?: string; eta?: string }>;
   key_points?: string[];
   decisions?: Array<{ id: string; title: string; description?: string; status: string; confidence: number }>;
   action_items?: Array<{ id: string; description: string; assignee?: string; status: string }>;

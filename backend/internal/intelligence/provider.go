@@ -91,12 +91,26 @@ type FinalizationInput struct {
 	MeetingID      string        `json:"meeting_id"`
 	FullTranscript string        `json:"full_transcript"`
 	FinalState     *MeetingState `json:"final_state"`
+	Title          string        `json:"title,omitempty"`
+	Glossary       Glossary      `json:"-"`
+}
+
+// MOMEntry is one item in the "current status → next actions" minutes-of-meeting
+// style summary entry.
+type MOMEntry struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Actions  string `json:"actions,omitempty"`
+	Assignee string `json:"assignee,omitempty"`
+	ETA      string `json:"eta,omitempty"`
 }
 
 // MeetingSummary is the final meeting summary
 type MeetingSummary struct {
 	Title        string         `json:"title"`
 	Summary      string         `json:"summary"`
+	MOMEntries   []MOMEntry     `json:"mom_entries"`
 	KeyPoints    []string       `json:"key_points"`
 	Decisions    []Decision     `json:"decisions"`
 	ActionItems  []ActionItem   `json:"action_items"`
@@ -116,15 +130,15 @@ const (
 )
 
 // NewProvider creates a new intelligence provider
-func NewProvider(providerType Provider, apiKey string) (IntelligenceProvider, error) {
+func NewProvider(providerType Provider, apiKey string, glossary Glossary) (IntelligenceProvider, error) {
 	switch providerType {
 	case ProviderGemini:
-		return NewGeminiIntelligence(apiKey)
+		return NewGeminiIntelligence(apiKey, glossary)
 	case ProviderGroq:
-		return NewGroqIntelligence(apiKey)
+		return NewGroqIntelligence(apiKey, glossary)
 	case ProviderOpenAI:
-		return NewOpenAIIntelligence(apiKey)
+		return NewOpenAIIntelligence(apiKey, glossary)
 	default:
-		return NewOpenAIIntelligence(apiKey)
+		return NewOpenAIIntelligence(apiKey, glossary)
 	}
 }

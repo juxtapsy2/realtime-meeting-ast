@@ -15,24 +15,25 @@ import (
 )
 
 type OpenAIIntelligence struct {
-	apiKey  string
-	model   string
-	baseURL string
-	client  *http.Client
+	apiKey   string
+	model    string
+	baseURL  string
+	client   *http.Client
+	glossary Glossary
 }
 
-func NewOpenAIIntelligence(apiKey string) (*OpenAIIntelligence, error) {
-	return newOpenAICompatible(apiKey, "https://api.openai.com/v1", "gpt-4o-mini")
+func NewOpenAIIntelligence(apiKey string, glossary Glossary) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.openai.com/v1", "gpt-4o-mini", glossary)
 }
 
 // NewGroqIntelligence returns an IntelligenceProvider backed by the Groq API.
 // Groq exposes an OpenAI-compatible chat completions endpoint, so it reuses the
 // same client and parsing as the OpenAI provider.
-func NewGroqIntelligence(apiKey string) (*OpenAIIntelligence, error) {
-	return newOpenAICompatible(apiKey, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
+func NewGroqIntelligence(apiKey string, glossary Glossary) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", glossary)
 }
 
-func newOpenAICompatible(apiKey, baseURL, defaultModel string) (*OpenAIIntelligence, error) {
+func newOpenAICompatible(apiKey, baseURL, defaultModel string, glossary Glossary) (*OpenAIIntelligence, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is required")
 	}
@@ -43,10 +44,11 @@ func newOpenAICompatible(apiKey, baseURL, defaultModel string) (*OpenAIIntellige
 	}
 
 	return &OpenAIIntelligence{
-		apiKey:  apiKey,
-		model:   model,
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 60 * time.Second},
+		apiKey:   apiKey,
+		model:    model,
+		baseURL:  baseURL,
+		client:   &http.Client{Timeout: 60 * time.Second},
+		glossary: glossary,
 	}, nil
 }
 
@@ -124,33 +126,54 @@ func (o *OpenAIIntelligence) buildFinalizationPrompt(input FinalizationInput) st
 		}
 	}
 
-	return fmt.Sprintf(`You are an AI meeting assistant. Generate a final meeting summary based on the complete transcript and final state.
+	glossary := o.glossary.PromptSection()
 
+	return fmt.Sprintf(`You are an AI meeting assistant. Generate a final meeting summary in Minutes of Meeting (MOM) style based on the complete transcript.
+
+%s
 Final Meeting State:
 %s
 
 Full Transcript:
 %s
 
-Generate a concise meeting summary:
-1. Brief title for the meeting
-2. Short executive summary (2-3 sentences)
-3. Key points (at most 5)
-4. Decisions made
-5. Action items with assignees
-6. Issues raised
-7. Open questions
+Write the summary in this exact MOM format. One entry per discussed item:
 
-Be concise. Format your response as JSON:
+28/09/2026 %s MOM:
+[ITEM_ID] Item title: current status of the item.
+
+  Actions: next action needed, ETA: expected completion period
+
+Rules:
+- The opening line must be "DD/MM/YYYY <meeting title> MOM:" using today's date.
+- Each entry begins with the exact business identifier in square brackets when one exists (e.g. [CR_002]). Never invent or change identifiers.
+- For every entry:
+  * state the CURRENT STATUS clearly (what has been confirmed/done/decided so far).
+  * then list the NEXT ACTIONS as a single "Actions:" line.
+  * include who is responsible when mentioned, and the ETA when mentioned.
+- Use the regulated business glossary terms EXACTLY as written. Never guess or substitute similar-sounding words for glossary terms.
+- Preserve the speakers' original language. If the meeting mixed Vietnamese and English, keep that mix in each entry.
+- Keep entries terse; no commentary outside the MOM format.
+
+Return JSON only:
 {
-  "title": "string",
-  "summary": "string",
-  "key_points": ["string"],
-  "decisions": [{"id": "uuid", "title": "string", "description": "string", "status": "confirmed", "confidence": 1.0}],
-  "action_items": [{"id": "uuid", "description": "string", "assignee": "string", "status": "pending"}],
-  "issues": [{"id": "uuid", "title": "string", "description": "string", "status": "open"}],
-  "questions": [{"id": "uuid", "question": "string", "status": "open"}]
-}`, stateJSON, input.FullTranscript)
+  "title": "meeting title",
+  "summary": "one- or two-sentence recap in MOM style",
+  "mom_entries": [
+    {
+      "id": "CR_002",
+      "title": "item title",
+      "status": "current status of the item",
+      "actions": "next actions, who, and ETA if mentioned",
+      "assignee": "responsible person/team if mentioned",
+      "eta": "expected completion period if mentioned"
+    }
+  ],
+  "key_points": ["short bullet"],
+  "participants": ["names if known"]
+}
+
+Do not include decisions, action_items, issues, questions, or duration arrays - use mom_entries only.`, glossary, stateJSON, input.FullTranscript, input.Title)
 }
 
 func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string, error) {

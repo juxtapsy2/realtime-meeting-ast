@@ -60,10 +60,15 @@ func main() {
 
 	meetingRepo := meetings.NewRepository(db.DB())
 
+	glossary, err := intelligence.LoadGlossary(os.Getenv("BUSINESS_GLOSSARY_PATH"))
+	if err != nil {
+		log.Printf("Warning: failed to load business glossary: %v (using empty glossary)", err)
+	}
+
 	var intelProvider intelligence.IntelligenceProvider
 	if cfg.LLMAPIKey != "" {
 		var err error
-		intelProvider, err = intelligence.NewProvider(intelligence.Provider(cfg.LLMProvider), cfg.LLMAPIKey)
+		intelProvider, err = intelligence.NewProvider(intelligence.Provider(cfg.LLMProvider), cfg.LLMAPIKey, glossary)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
 			log.Println("Intelligence features will be disabled")
@@ -77,7 +82,7 @@ func main() {
 	hub := realtime.NewHub()
 	go hub.Run()
 
-	meetingService := meetings.NewService(meetingRepo, hub, intelProvider)
+	meetingService := meetings.NewService(meetingRepo, hub, intelProvider, glossary)
 
 	mux := http.NewServeMux()
 

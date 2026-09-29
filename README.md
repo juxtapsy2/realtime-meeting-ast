@@ -76,10 +76,14 @@ PORT=8080
 DATABASE_URL=postgres://localhost:5432/meeting_ast?sslmode=disable
 
 # AI Providers
-STT_PROVIDER=deepgram
-STT_API_KEY=your_deepgram_api_key
-LLM_PROVIDER=openai
-LLM_API_KEY=your_openai_api_key
+STT_PROVIDER=google
+STT_API_KEY=your_stt_api_key
+LLM_PROVIDER=groq
+LLM_API_KEY=your_llm_api_key
+
+# Optional: path to a business glossary JSON file ({ "terms": [{ "term": "CR", "expansion": "Change Request", ... }] }).
+# Defaults to an embedded glossary.
+BUSINESS_GLOSSARY_PATH=/path/to/glossary.json
 ```
 
 ### Database Setup
