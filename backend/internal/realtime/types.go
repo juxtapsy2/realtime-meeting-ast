@@ -7,5 +7,7 @@ type MeetingService interface {
 	GetMeetingByID(id int) (*types.MeetingInfo, error)
 	StartMeeting(id int) error
 	EndMeeting(id int) error
+	PauseMeeting(id int) error
+	ResumeMeeting(id int) error
 	SaveTranscriptSegment(meetingID int, segment *types.TranscriptEvent) error
 }

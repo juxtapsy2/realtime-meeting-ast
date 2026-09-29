@@ -25,6 +25,7 @@ type MeetingStatus string
 const (
 	MeetingStatusPending   MeetingStatus = "pending"
 	MeetingStatusActive    MeetingStatus = "active"
+	MeetingStatusPaused    MeetingStatus = "paused"
 	MeetingStatusCompleted MeetingStatus = "completed"
 )
 

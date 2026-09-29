@@ -55,6 +55,30 @@
       "description": "Internal system/product name; keep as-is."
     },
     {
+      "term": "eB2B",
+      "aliases": ["eb2b", "b2b"],
+      "expansion": "eB2B",
+      "description": "Internal system/product name; keep as-is."
+    },
+    {
+      "term": "MDM",
+      "aliases": ["mdm"],
+      "expansion": "MDM",
+      "description": "Master Data Management team."
+    },
+    {
+      "term": "L1",
+      "aliases": ["l1", "level 1"],
+      "expansion": "L1",
+      "description": "Level 1 support team."
+    },
+    {
+      "term": "L2",
+      "aliases": ["l2", "level 2"],
+      "expansion": "L2",
+      "description": "Level 2 support team."
+    },
+    {
       "term": "AIS",
       "aliases": ["ais"],
       "expansion": "AIS",
@@ -88,6 +112,12 @@
       "term": "BSG",
       "aliases": ["bsg"],
       "expansion": "BSG",
+      "description": "Vendor/company name; keep as-is."
+    },
+    {
+      "term": "InterK",
+      "aliases": ["interk"],
+      "expansion": "InterK",
       "description": "Vendor/company name; keep as-is."
     },
     {

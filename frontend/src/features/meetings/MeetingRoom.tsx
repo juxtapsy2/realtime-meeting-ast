@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Meeting, TranscriptEvent, MeetingState } from '../../types';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { useMicrophone } from '../../hooks/useMicrophone';
+import { AudioSource, useMicrophone } from '../../hooks/useMicrophone';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
 import { IntelligencePanel } from '../intelligence/IntelligencePanel';
 
@@ -22,7 +22,11 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     issues: [],
     questions: [],
   });
-  const [isMeetingActive, setIsMeetingActive] = useState(meeting.status === 'active');
+  const [isMeetingActive, setIsMeetingActive] = useState(
+    meeting.status === 'active' || meeting.status === 'paused'
+  );
+  const [isPaused, setIsPaused] = useState(meeting.status === 'paused');
+  const lastSourceRef = useRef<AudioSource | null>(null);
 
   const handleTranscriptPartial = useCallback((event: TranscriptEvent) => {
     setPartialText(event.text);
@@ -35,6 +39,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
 
   const handleMeetingStarted = useCallback(() => {
     setIsMeetingActive(true);
+    setIsPaused(false);
   }, []);
 
   const stopMicRef = useRef<() => void>(() => {});
@@ -44,6 +49,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
 
   const handleMeetingEnded = useCallback(() => {
     setIsMeetingActive(false);
+    setIsPaused(false);
     stopMicRef.current();
     onMeetingEnded?.();
   }, [onMeetingEnded]);
@@ -61,6 +67,8 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     onTranscriptFinal: handleTranscriptFinal,
     onMeetingStarted: handleMeetingStarted,
     onMeetingEnded: handleMeetingEnded,
+    onMeetingPaused: () => setIsPaused(true),
+    onMeetingResumed: () => setIsPaused(false),
     onStateUpdate: handleStateUpdate,
   });
 
@@ -84,10 +92,29 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     sendCommand('end_meeting', { meeting_id: meeting.id });
   };
 
+  const handlePauseMeeting = () => {
+    if (isMicActive) {
+      lastSourceRef.current = audioSource;
+      stopMic();
+    }
+    setIsPaused(true);
+    sendCommand('pause_meeting', { meeting_id: meeting.id });
+  };
+
+  const handleResumeMeeting = () => {
+    setIsPaused(false);
+    sendCommand('resume_meeting', { meeting_id: meeting.id });
+    const lastSource = lastSourceRef.current || 'microphone';
+    if (!isMicActive) {
+      startMic(lastSource);
+    }
+  };
+
   const handleToggleMic = async () => {
     if (isMicActive) {
       stopMic();
     } else {
+      lastSourceRef.current = 'microphone';
       await startMic('microphone');
     }
   };
@@ -96,6 +123,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     if (isMicActive) {
       stopMic();
     } else {
+      lastSourceRef.current = 'system';
       await startMic('system');
     }
   };
@@ -117,7 +145,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
             <div>
               <h1 className="text-xl font-semibold text-gray-900">{meeting.title}</h1>
               <p className="text-sm text-gray-500">
-                Status: {isMeetingActive ? 'Recording' : meeting.status}
+                Status: {isPaused ? 'Paused' : isMeetingActive ? 'Recording' : meeting.status}
               </p>
             </div>
           </div>
@@ -141,18 +169,35 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
                 Start Meeting
               </button>
             ) : (
-              <button
-                onClick={handleEndMeeting}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                End Meeting
-              </button>
+              <>
+                {!isPaused ? (
+                  <button
+                    onClick={handlePauseMeeting}
+                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+                  >
+                    Pause
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleResumeMeeting}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  >
+                    Resume
+                  </button>
+                )}
+                <button
+                  onClick={handleEndMeeting}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  End Meeting
+                </button>
+              </>
             )}
 
             {/* Audio source control */}
             <button
               onClick={handleToggleMic}
-              disabled={!isConnected || !isMeetingActive}
+              disabled={!isConnected || !isMeetingActive || isPaused}
               className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
                 isMicActive && audioSource === 'microphone'
                   ? 'bg-red-100 text-red-700 hover:bg-red-200'
@@ -163,7 +208,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
             </button>
             <button
               onClick={handleToggleSystemAudio}
-              disabled={!isConnected || !isMeetingActive}
+              disabled={!isConnected || !isMeetingActive || isPaused}
               className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
                 isMicActive && audioSource === 'system'
                   ? 'bg-red-100 text-red-700 hover:bg-red-200'

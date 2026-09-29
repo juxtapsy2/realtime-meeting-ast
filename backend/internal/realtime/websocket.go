@@ -136,7 +136,7 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 		}
 
 		if messageType == websocket.BinaryMessage {
-			if transcriber != nil {
+			if transcriber != nil && c.audioEnabled(c.MeetingID) {
 				if err := transcriber.WriteAudio(message); err != nil {
 					log.Printf("Error writing audio to transcriber: %v", err)
 				}
@@ -152,7 +152,7 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 
 		var audioMsg AudioMessage
 		if err := json.Unmarshal(message, &audioMsg); err == nil && audioMsg.Type == "audio" {
-			if transcriber != nil {
+			if transcriber != nil && c.audioEnabled(c.MeetingID) {
 				if err := transcriber.WriteAudio(audioMsg.Payload); err != nil {
 					log.Printf("Error writing audio to transcriber: %v", err)
 				}
@@ -230,9 +230,25 @@ func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {
 		if err := meetingSvc.EndMeeting(cmd.MeetingID); err != nil {
 			log.Printf("Error ending meeting: %v", err)
 		}
+	case "pause_meeting":
+		if err := meetingSvc.PauseMeeting(cmd.MeetingID); err != nil {
+			log.Printf("Error pausing meeting: %v", err)
+		}
+		c.Hub.SetMeetingPaused(cmd.MeetingID, true)
+	case "resume_meeting":
+		if err := meetingSvc.ResumeMeeting(cmd.MeetingID); err != nil {
+			log.Printf("Error resuming meeting: %v", err)
+		}
+		c.Hub.SetMeetingPaused(cmd.MeetingID, false)
 	default:
 		log.Printf("Unknown command: %s", cmd.Type)
 	}
+}
+
+// audioEnabled reports whether audio from a client should be forwarded to the
+// transcriber. Audio is dropped while the meeting is paused.
+func (c *Client) audioEnabled(meetingID int) bool {
+	return !c.Hub.IsMeetingPaused(meetingID)
 }
 
 func extractMeetingID(path string) (int, error) {

@@ -187,6 +187,36 @@ func (s *Service) EndMeeting(id int) error {
 	return nil
 }
 
+func (s *Service) PauseMeeting(id int) error {
+	if err := s.repo.PauseMeeting(id); err != nil {
+		return err
+	}
+
+	meeting, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	s.broadcaster.BroadcastToMeeting(id, "meeting.paused", meeting)
+
+	return nil
+}
+
+func (s *Service) ResumeMeeting(id int) error {
+	if err := s.repo.ResumeMeeting(id); err != nil {
+		return err
+	}
+
+	meeting, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	s.broadcaster.BroadcastToMeeting(id, "meeting.resumed", meeting)
+
+	return nil
+}
+
 // finalizeMeetingAsync generates and persists the meeting summary in the
 // background so transcription/client flow is not blocked.
 func (s *Service) finalizeMeetingAsync(meetingID int) {

@@ -2,7 +2,7 @@ export interface Meeting {
   id: number;
   title: string;
   project_id?: number;
-  status: 'pending' | 'active' | 'completed';
+  status: 'pending' | 'active' | 'paused' | 'completed';
   started_at?: string;
   ended_at?: string;
   transcript?: TranscriptEvent[];

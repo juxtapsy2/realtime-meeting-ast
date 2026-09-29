@@ -66,6 +66,7 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
       active: 'bg-green-100 text-green-800',
+      paused: 'bg-amber-100 text-amber-800',
       completed: 'bg-blue-100 text-blue-800',
     };
     return (

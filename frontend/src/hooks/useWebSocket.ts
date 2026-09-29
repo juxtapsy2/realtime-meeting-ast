@@ -7,6 +7,8 @@ interface UseWebSocketOptions {
   onTranscriptFinal?: (event: TranscriptEvent) => void;
   onMeetingStarted?: (data: any) => void;
   onMeetingEnded?: (data: any) => void;
+  onMeetingPaused?: (data: any) => void;
+  onMeetingResumed?: (data: any) => void;
   onStateUpdate?: (state: Partial<MeetingState>) => void;
   onMeetingSummary?: (data: any) => void;
   onError?: (error: Event) => void;
@@ -18,6 +20,8 @@ export function useWebSocket({
   onTranscriptFinal,
   onMeetingStarted,
   onMeetingEnded,
+  onMeetingPaused,
+  onMeetingResumed,
   onStateUpdate,
   onMeetingSummary,
   onError,
@@ -32,6 +36,8 @@ export function useWebSocket({
     onTranscriptFinal,
     onMeetingStarted,
     onMeetingEnded,
+    onMeetingPaused,
+    onMeetingResumed,
     onStateUpdate,
     onMeetingSummary,
     onError,
@@ -41,6 +47,8 @@ export function useWebSocket({
     onTranscriptFinal,
     onMeetingStarted,
     onMeetingEnded,
+    onMeetingPaused,
+    onMeetingResumed,
     onStateUpdate,
     onMeetingSummary,
     onError,
@@ -86,6 +94,12 @@ export function useWebSocket({
             break;
           case 'meeting.ended':
             cbs.onMeetingEnded?.(data.data);
+            break;
+          case 'meeting.paused':
+            cbs.onMeetingPaused?.(data.data);
+            break;
+          case 'meeting.resumed':
+            cbs.onMeetingResumed?.(data.data);
             break;
           case 'state.updated':
             cbs.onStateUpdate?.(data.data);

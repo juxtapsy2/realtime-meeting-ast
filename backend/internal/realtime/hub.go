@@ -27,6 +27,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	meetings   map[int]map[*Client]bool
+	paused     map[int]bool
 	mu         sync.RWMutex
 }
 
@@ -37,7 +38,27 @@ func NewHub() *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		meetings:   make(map[int]map[*Client]bool),
+		paused:     make(map[int]bool),
 	}
+}
+
+// SetMeetingPaused records whether a meeting is paused. While paused, audio
+// sent by clients is dropped so no transcription is produced.
+func (h *Hub) SetMeetingPaused(id int, paused bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if paused {
+		h.paused[id] = true
+	} else {
+		delete(h.paused, id)
+	}
+}
+
+// IsMeetingPaused reports whether a meeting is currently paused.
+func (h *Hub) IsMeetingPaused(id int) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.paused[id]
 }
 
 func (h *Hub) Run() {

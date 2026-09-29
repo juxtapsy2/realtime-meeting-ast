@@ -192,6 +192,34 @@ func (r *Repository) EndMeeting(id int) error {
 	return nil
 }
 
+func (r *Repository) PauseMeeting(id int) error {
+	query := `
+		UPDATE meetings
+		SET status = $2, updated_at = $3
+		WHERE id = $1`
+
+	_, err := r.db.Exec(query, id, MeetingStatusPaused, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to pause meeting: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) ResumeMeeting(id int) error {
+	query := `
+		UPDATE meetings
+		SET status = $2, updated_at = $3
+		WHERE id = $1`
+
+	_, err := r.db.Exec(query, id, MeetingStatusActive, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to resume meeting: %w", err)
+	}
+
+	return nil
+}
+
 func scanMeetingJSON(meeting *Meeting, transcript []byte, summary []byte) error {
 	if len(transcript) > 0 {
 		if err := json.Unmarshal(transcript, &meeting.Transcript); err != nil {
