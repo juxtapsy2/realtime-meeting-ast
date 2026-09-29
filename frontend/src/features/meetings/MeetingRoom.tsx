@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Meeting, TranscriptEvent, MeetingState } from '../../types';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useMicrophone } from '../../hooks/useMicrophone';
@@ -8,9 +8,10 @@ import { IntelligencePanel } from '../intelligence/IntelligencePanel';
 interface MeetingRoomProps {
   meeting: Meeting;
   onBack: () => void;
+  onMeetingEnded?: () => void;
 }
 
-export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
+export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProps) {
   const [transcript, setTranscript] = useState<TranscriptEvent[]>([]);
   const [partialText, setPartialText] = useState<string>('');
   const [meetingState, setMeetingState] = useState<MeetingState>({
@@ -36,9 +37,16 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
     setIsMeetingActive(true);
   }, []);
 
+  const stopMicRef = useRef<() => void>(() => {});
+  const stopMicRefSetter = useCallback((cb: () => void) => {
+    stopMicRef.current = cb;
+  }, []);
+
   const handleMeetingEnded = useCallback(() => {
     setIsMeetingActive(false);
-  }, []);
+    stopMicRef.current();
+    onMeetingEnded?.();
+  }, [onMeetingEnded]);
 
   const handleStateUpdate = useCallback((state: Partial<MeetingState>) => {
     setMeetingState((prev) => ({
@@ -60,9 +68,13 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
     sendAudio(data);
   }, [sendAudio]);
 
-  const { isActive: isMicActive, start: startMic, stop: stopMic } = useMicrophone({
+  const { isActive: isMicActive, source: audioSource, start: startMic, stop: stopMic } = useMicrophone({
     onAudioData: handleAudioData,
   });
+
+  useEffect(() => {
+    stopMicRefSetter(stopMic);
+  }, [stopMic, stopMicRefSetter]);
 
   const handleStartMeeting = () => {
     sendCommand('start_meeting', { meeting_id: meeting.id });
@@ -76,7 +88,15 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
     if (isMicActive) {
       stopMic();
     } else {
-      await startMic();
+      await startMic('microphone');
+    }
+  };
+
+  const handleToggleSystemAudio = async () => {
+    if (isMicActive) {
+      stopMic();
+    } else {
+      await startMic('system');
     }
   };
 
@@ -129,17 +149,28 @@ export function MeetingRoom({ meeting, onBack }: MeetingRoomProps) {
               </button>
             )}
 
-            {/* Microphone control */}
+            {/* Audio source control */}
             <button
               onClick={handleToggleMic}
               disabled={!isConnected || !isMeetingActive}
               className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-                isMicActive
+                isMicActive && audioSource === 'microphone'
                   ? 'bg-red-100 text-red-700 hover:bg-red-200'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              {isMicActive ? 'Stop Mic' : 'Start Mic'}
+              {isMicActive && audioSource === 'microphone' ? 'Stop Mic' : 'Use Mic'}
+            </button>
+            <button
+              onClick={handleToggleSystemAudio}
+              disabled={!isConnected || !isMeetingActive}
+              className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                isMicActive && audioSource === 'system'
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {isMicActive && audioSource === 'system' ? 'Stop System Audio' : 'Use System Audio'}
             </button>
           </div>
         </div>

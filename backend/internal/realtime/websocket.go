@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
 	"github.com/user/realtime-meeting-ast/backend/internal/transcription"
-	"github.com/user/realtime-meeting-ast/backend/internal/types"
 )
 
 var upgrader = websocket.Upgrader{
@@ -39,14 +37,14 @@ type CommandMessage struct {
 	MeetingID int    `json:"meeting_id"`
 }
 
-func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string, llmProvider string, llmAPIKey string) {
+func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string) {
 	meetingID, err := extractMeetingID(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
 		return
 	}
 
-	_, err = meetingSvc.GetMeetingByID(meetingID)
+	info, err := meetingSvc.GetMeetingByID(meetingID)
 	if err != nil {
 		http.Error(w, "Meeting not found", http.StatusNotFound)
 		return
@@ -69,6 +67,15 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 	hub.Register(client)
 
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Completed meetings are rendered through a passive listener: no
+	// transcriber is started, the client only receives broadcasts such as
+	// meeting.summary. Historical transcripts are served over REST.
+	if info.Status == "completed" {
+		go client.writePump()
+		go client.readPump(nil, meetingSvc, cancel)
+		return
+	}
 
 	providerType := transcription.Provider(sttProvider)
 	transcriber, err := transcription.NewProvider(providerType, sttAPIKey)
@@ -97,22 +104,16 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 		return
 	}
 
-	var intelProvider intelligence.IntelligenceProvider
-	if llmAPIKey != "" {
-		intelProvider, err = intelligence.NewProvider(intelligence.Provider(llmProvider), llmAPIKey)
-		if err != nil {
-			log.Printf("Warning: Failed to initialize intelligence provider: %v", err)
-		}
-	}
-
 	go client.writePump()
 	go client.readPump(transcriber, meetingSvc, cancel)
-	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID, intelProvider)
+	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID)
 }
 
 func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc MeetingService, cancel context.CancelFunc) {
 	defer func() {
-		transcriber.Close()
+		if transcriber != nil {
+			transcriber.Close()
+		}
 		cancel()
 		c.Hub.Unregister(c)
 		c.Conn.WS.Close()
@@ -135,8 +136,10 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 		}
 
 		if messageType == websocket.BinaryMessage {
-			if err := transcriber.WriteAudio(message); err != nil {
-				log.Printf("Error writing audio to transcriber: %v", err)
+			if transcriber != nil {
+				if err := transcriber.WriteAudio(message); err != nil {
+					log.Printf("Error writing audio to transcriber: %v", err)
+				}
 			}
 			continue
 		}
@@ -149,8 +152,10 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 
 		var audioMsg AudioMessage
 		if err := json.Unmarshal(message, &audioMsg); err == nil && audioMsg.Type == "audio" {
-			if err := transcriber.WriteAudio(audioMsg.Payload); err != nil {
-				log.Printf("Error writing audio to transcriber: %v", err)
+			if transcriber != nil {
+				if err := transcriber.WriteAudio(audioMsg.Payload); err != nil {
+					log.Printf("Error writing audio to transcriber: %v", err)
+				}
 			}
 			continue
 		}
@@ -197,11 +202,7 @@ func (c *Client) transcriptPump(
 	meetingSvc MeetingService,
 	hub *Hub,
 	meetingID int,
-	intelProvider intelligence.IntelligenceProvider,
 ) {
-	var recentTranscript strings.Builder
-	finalSegments := make([]types.TranscriptEvent, 0)
-
 	for event := range transcriber.Events() {
 		event.MeetingID = strconv.Itoa(meetingID)
 
@@ -215,47 +216,8 @@ func (c *Client) transcriptPump(
 			if err := meetingSvc.SaveTranscriptSegment(meetingID, &event); err != nil {
 				log.Printf("Error saving transcript segment: %v", err)
 			}
-
-			finalSegments = append(finalSegments, event)
-			recentTranscript.WriteString(event.Text)
-			recentTranscript.WriteString(" ")
-
-			if intelProvider != nil && len(finalSegments)%5 == 0 {
-				go c.analyzeChunk(intelProvider, meetingID, recentTranscript.String(), hub)
-			}
 		}
 	}
-}
-
-func (c *Client) analyzeChunk(
-	provider intelligence.IntelligenceProvider,
-	meetingID int,
-	transcriptChunk string,
-	hub *Hub,
-) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	input := intelligence.AnalysisInput{
-		MeetingID:       strconv.Itoa(meetingID),
-		TranscriptChunk: transcriptChunk,
-		CurrentState: &intelligence.MeetingState{
-			CurrentTopic: "",
-			Topics:       []intelligence.Topic{},
-			Decisions:    []intelligence.Decision{},
-			ActionItems:  []intelligence.ActionItem{},
-			Issues:       []intelligence.Issue{},
-			Questions:    []intelligence.OpenQuestion{},
-		},
-	}
-
-	patch, err := provider.AnalyzeChunk(ctx, input)
-	if err != nil {
-		log.Printf("Error analyzing chunk: %v", err)
-		return
-	}
-
-	hub.BroadcastToMeeting(meetingID, "state.updated", patch)
 }
 
 func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {

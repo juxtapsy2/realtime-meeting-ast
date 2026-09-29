@@ -20,6 +20,9 @@ function App() {
       <MeetingRoom
         meeting={selectedMeeting}
         onBack={() => setSelectedMeeting(null)}
+        onMeetingEnded={() => setSelectedMeeting((prev) =>
+          prev ? { ...prev, status: 'completed' } : prev
+        )}
       />
     );
   }

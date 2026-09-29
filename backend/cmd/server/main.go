@@ -85,7 +85,7 @@ func main() {
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
 	mux.HandleFunc("/api/transcript/", handleTranscript(meetingService))
 
-	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey, cfg.LLMProvider, cfg.LLMAPIKey))
+	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey))
 
 	handler := corsMiddleware(mux)
 
@@ -207,8 +207,8 @@ func handleTranscript(svc *meetings.Service) http.HandlerFunc {
 	}
 }
 
-func handleWebSocket(hub *realtime.Hub, svc *meetings.Service, sttProvider string, sttAPIKey string, llmProvider string, llmAPIKey string) http.HandlerFunc {
+func handleWebSocket(hub *realtime.Hub, svc *meetings.Service, sttProvider string, sttAPIKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, svc, w, r, sttProvider, sttAPIKey, llmProvider, llmAPIKey)
+		realtime.HandleWebSocket(hub, svc, w, r, sttProvider, sttAPIKey)
 	}
 }

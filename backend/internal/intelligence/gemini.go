@@ -157,7 +157,6 @@ func (g *GeminiIntelligence) callLLM(ctx context.Context, prompt string) (string
 			},
 		},
 		"temperature": 0.3,
-		"max_tokens":  1500,
 	}
 
 	jsonBody, err := json.Marshal(requestBody)

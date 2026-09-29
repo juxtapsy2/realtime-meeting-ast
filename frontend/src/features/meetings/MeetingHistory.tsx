@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Meeting, TranscriptEvent, MeetingSummary } from '../../types';
 import { fetchTranscript, fetchMeeting } from '../../api/meetings';
+import { useWebSocket } from '../../hooks/useWebSocket';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
 
 interface MeetingHistoryProps {
@@ -38,41 +39,32 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     };
   }, [meeting.id]);
 
+  // Hydrate an already-persisted summary once (historical view via REST).
   useEffect(() => {
-    if (meeting.summary) {
-      setSummary(meeting.summary);
-      return;
-    }
-
     let cancelled = false;
-    let attempts = 0;
-    const poll = () => {
-      fetchMeeting(meeting.id)
-        .then((fresh) => {
-          if (cancelled) return;
-          if (fresh.summary) {
-            setSummary(fresh.summary);
-            return;
-          }
-          if (attempts < 10 && meeting.status === 'completed') {
-            attempts += 1;
-            setTimeout(poll, 3000);
-          }
-        })
-        .catch((err) => {
-          console.error('Failed to load summary', err);
-          if (!cancelled && attempts < 3 && meeting.status === 'completed') {
-            attempts += 1;
-            setTimeout(poll, 5000);
-          }
-        });
-    };
-    poll();
+    fetchMeeting(meeting.id)
+      .then((fresh) => {
+        if (!cancelled && fresh.summary) {
+          setSummary(fresh.summary);
+        }
+      })
+      .catch((err) => console.error('Failed to load meeting', err));
 
     return () => {
       cancelled = true;
     };
-  }, [meeting.id, meeting.summary, meeting.status]);
+  }, [meeting.id]);
+
+  // If the summary is still being generated for this completed meeting,
+  // receive it live over the WebSocket listener instead of polling REST.
+  const handleMeetingSummary = useCallback((data: MeetingSummary) => {
+    setSummary(data);
+  }, []);
+
+  useWebSocket({
+    meetingId: meeting.id,
+    onMeetingSummary: handleMeetingSummary,
+  });
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -237,7 +229,7 @@ function SummaryPending() {
   return (
     <div className="py-8 text-center">
       <p className="text-gray-500 text-sm">Summary is being generated...</p>
-      <p className="text-gray-400 text-xs mt-1">This page refreshes automatically.</p>
+      <p className="text-gray-400 text-xs mt-1">It will appear here automatically when ready.</p>
       <div className="mt-3 flex justify-center">
         <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
       </div>
