@@ -25,6 +25,12 @@
       "description": "Document describing business requirements a change must satisfy."
     },
     {
+      "term": "Route",
+      "aliases": ["route"],
+      "expansion": "Route",
+      "description": "A way of organizing retails and sales representatives."
+    },
+    {
       "term": "SIT",
       "aliases": ["sit", "system integration test", "system integration testing"],
       "expansion": "System Integration Testing",
