@@ -76,15 +76,24 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 	return meeting, nil
 }
 
-func (r *Repository) List() ([]*Meeting, error) {
+// List returns a page of meetings ordered newest-first, and the total number of
+// meetings. limit is the max page size; offset is the number of meetings to skip
+// (0 for the first page).
+func (r *Repository) List(limit, offset int) ([]*Meeting, int, error) {
+	var total int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM meetings`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count meetings: %w", err)
+	}
+
 	query := `
 		SELECT id, title, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
 		FROM meetings
-		ORDER BY created_at DESC`
+		ORDER BY created_at DESC, id DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list meetings: %w", err)
+		return nil, 0, fmt.Errorf("failed to list meetings: %w", err)
 	}
 	defer rows.Close()
 
@@ -106,15 +115,15 @@ func (r *Repository) List() ([]*Meeting, error) {
 			&meeting.UpdatedAt,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan meeting: %w", err)
+			return nil, 0, fmt.Errorf("failed to scan meeting: %w", err)
 		}
 		if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
-			return nil, fmt.Errorf("failed to parse meeting %d: %w", meeting.ID, err)
+			return nil, 0, fmt.Errorf("failed to parse meeting %d: %w", meeting.ID, err)
 		}
 		meetings = append(meetings, meeting)
 	}
 
-	return meetings, nil
+	return meetings, total, nil
 }
 
 func (r *Repository) Update(meeting *Meeting) error {

@@ -46,6 +46,9 @@ type MeetingResponse struct {
 
 type MeetingsResponse struct {
 	Meetings []*Meeting `json:"meetings"`
+	Total    int        `json:"total"`
+	Page     int        `json:"page"`
+	Limit    int        `json:"limit"`
 }
 
 func (s *Service) CreateMeeting(w http.ResponseWriter, r *http.Request) {
@@ -93,14 +96,44 @@ func (s *Service) GetMeeting(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) ListMeetings(w http.ResponseWriter, r *http.Request) {
-	meetings, err := s.repo.List()
+	page, limit := parsePagination(r)
+	meetings, total, err := s.repo.List(limit, (page-1)*limit)
 	if err != nil {
 		http.Error(w, "Failed to list meetings", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(MeetingsResponse{Meetings: meetings})
+	json.NewEncoder(w).Encode(MeetingsResponse{Meetings: meetings, Total: total, Page: page, Limit: limit})
+}
+
+// parsePagination reads page/limit from query params with sensible defaults and
+// caps. page is 1-based, limit is clamped to [1, 100].
+func parsePagination(r *http.Request) (int, int) {
+	page := intParam(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	limit := intParam(r, "limit", 20)
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return page, limit
+}
+
+func intParam(r *http.Request, key string, def int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func (s *Service) UpdateMeeting(w http.ResponseWriter, r *http.Request) {

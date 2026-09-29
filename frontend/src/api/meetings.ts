@@ -2,13 +2,25 @@ import { Meeting, TranscriptEvent } from '../types';
 
 const API_BASE = '/api';
 
-export async function fetchMeetings(): Promise<Meeting[]> {
-  const response = await fetch(`${API_BASE}/meetings`);
+export interface PaginatedMeetings {
+  meetings: Meeting[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function fetchMeetings(page: number = 1, limit: number = 20): Promise<PaginatedMeetings> {
+  const response = await fetch(`${API_BASE}/meetings?page=${page}&limit=${limit}`);
   if (!response.ok) {
     throw new Error('Failed to fetch meetings');
   }
   const data = await response.json();
-  return data.meetings || [];
+  return {
+    meetings: data.meetings || [],
+    total: data.total ?? 0,
+    page: data.page ?? page,
+    limit: data.limit ?? limit,
+  };
 }
 
 export async function fetchTranscript(meetingId: number): Promise<TranscriptEvent[]> {
