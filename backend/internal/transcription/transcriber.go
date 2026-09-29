@@ -49,7 +49,6 @@ const (
 	ProviderDeepgram Provider = "deepgram"
 	ProviderOpenAI   Provider = "openai"
 	ProviderGroq     Provider = "groq"
-	ProviderWhisper  Provider = "whisper"
 	ProviderGoogle   Provider = "google"
 )
 
@@ -64,8 +63,6 @@ func NewProvider(providerType Provider, apiKey string, vocab Vocabulary) (Transc
 		return NewOpenAITranscriber(apiKey)
 	case ProviderGroq:
 		return NewGroqTranscriber(apiKey)
-	case ProviderWhisper:
-		return NewWhisperTranscriber(apiKey)
 	case ProviderGoogle:
 		return NewGoogleTranscriber(apiKey, vocab)
 	default:

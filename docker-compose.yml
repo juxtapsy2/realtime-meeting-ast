@@ -28,32 +28,11 @@ services:
     environment:
       PORT: 8080
       CONTAINER: "1"
-      WHISPER_URL: http://whisper:8000
     volumes:
       - ./secrets/gcp-service-account.json:/run/secrets/gcp-service-account.json:ro
     depends_on:
       postgres:
         condition: service_healthy
-      whisper:
-        condition: service_started
-
-  whisper:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu
-    container_name: meeting-ast-whisper
-    ports:
-      - "8000:8000"
-    environment:
-      PRELOAD_MODELS: '["Systran/faster-whisper-large-v3"]'
-      WHISPER__INFERENCE_DEVICE: "cpu"
-      WHISPER__COMPUTE_TYPE: "int8"
-      WHISPER__CPU_THREADS: "12"
-      WHISPER__NUM_WORKERS: "2"
-      WHISPER__USE_BATCHED_MODE: "true"
-      WHISPER__BATCH_SIZE: "8"
-      WHISPER__MAX_BATCHED_SEGMENTS: "16"
-    volumes:
-      - whisper_models:/home/ubuntu/.cache/huggingface/hub
-    restart: unless-stopped
 
   frontend:
     build:
@@ -70,4 +49,3 @@ services:
 
 volumes:
   postgres_data:
-  whisper_models:

@@ -75,7 +75,7 @@ func main() {
 		}
 	}
 
-	if cfg.STTAPIKey == "" && cfg.STTProvider != string(transcription.ProviderWhisper) && cfg.STTProvider != string(transcription.ProviderGoogle) {
+	if cfg.STTAPIKey == "" && cfg.STTProvider != string(transcription.ProviderGoogle) {
 		log.Printf("Warning: no API key set for STT provider %q. Transcription will not work.", cfg.STTProvider)
 	}
 
