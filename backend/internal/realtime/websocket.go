@@ -37,7 +37,7 @@ type CommandMessage struct {
 	MeetingID int    `json:"meeting_id"`
 }
 
-func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string) {
+func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string, vocab transcription.Vocabulary) {
 	meetingID, err := extractMeetingID(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
@@ -78,7 +78,7 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 	}
 
 	providerType := transcription.Provider(sttProvider)
-	transcriber, err := transcription.NewProvider(providerType, sttAPIKey)
+	transcriber, err := transcription.NewProvider(providerType, sttAPIKey, vocab)
 	if err != nil {
 		log.Printf("Failed to create transcriber: %v", err)
 		hub.Unregister(client)
@@ -146,7 +146,7 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 
 		var cmd CommandMessage
 		if err := json.Unmarshal(message, &cmd); err == nil && cmd.Type != "" {
-			c.handleCommand(cmd, meetingSvc)
+			c.handleCommand(cmd, meetingSvc, transcriber)
 			continue
 		}
 
@@ -220,7 +220,7 @@ func (c *Client) transcriptPump(
 	}
 }
 
-func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {
+func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService, transcriber transcription.Transcriber) {
 	switch cmd.Type {
 	case "start_meeting":
 		if err := meetingSvc.StartMeeting(cmd.MeetingID); err != nil {
@@ -230,11 +230,13 @@ func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {
 		if err := meetingSvc.EndMeeting(cmd.MeetingID); err != nil {
 			log.Printf("Error ending meeting: %v", err)
 		}
+		dropSTTConnection(transcriber)
 	case "pause_meeting":
 		if err := meetingSvc.PauseMeeting(cmd.MeetingID); err != nil {
 			log.Printf("Error pausing meeting: %v", err)
 		}
 		c.Hub.SetMeetingPaused(cmd.MeetingID, true)
+		dropSTTConnection(transcriber)
 	case "resume_meeting":
 		if err := meetingSvc.ResumeMeeting(cmd.MeetingID); err != nil {
 			log.Printf("Error resuming meeting: %v", err)
@@ -242,6 +244,18 @@ func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService) {
 		c.Hub.SetMeetingPaused(cmd.MeetingID, false)
 	default:
 		log.Printf("Unknown command: %s", cmd.Type)
+	}
+}
+
+// dropSTTConnection actively releases the provider session (if the provider
+// supports it). This keeps per-minute-billed connections from idling when a
+// meeting pauses or ends; a future audio chunk lazily reconnects.
+func dropSTTConnection(transcriber transcription.Transcriber) {
+	if transcriber == nil {
+		return
+	}
+	if d, ok := transcriber.(transcription.ConnectionDropper); ok {
+		d.DropConnection()
 	}
 }
 

@@ -24,6 +24,14 @@ type Transcriber interface {
 	Close() error
 }
 
+// ConnectionDropper is implemented by transcribers whose upstream connection
+// can be actively released. Dropping tears down the current session
+// immediately (useful when a meeting pauses or ends) without preventing a
+// future reconnect on the next audio chunk.
+type ConnectionDropper interface {
+	DropConnection()
+}
+
 // Config contains configuration for the transcriber
 type Config struct {
 	Language       string `json:"language"`
@@ -45,8 +53,10 @@ const (
 	ProviderGoogle   Provider = "google"
 )
 
-// NewProvider creates a new transcriber based on the provider type
-func NewProvider(providerType Provider, apiKey string) (Transcriber, error) {
+// NewProvider creates a new transcriber based on the provider type.
+// vocab carries domain terminology for phrase biasing and normalization; it is
+// currently consumed by the Google provider only.
+func NewProvider(providerType Provider, apiKey string, vocab Vocabulary) (Transcriber, error) {
 	switch providerType {
 	case ProviderDeepgram:
 		return NewDeepgramTranscriber(apiKey)
@@ -57,7 +67,7 @@ func NewProvider(providerType Provider, apiKey string) (Transcriber, error) {
 	case ProviderWhisper:
 		return NewWhisperTranscriber(apiKey)
 	case ProviderGoogle:
-		return NewGoogleTranscriber(apiKey)
+		return NewGoogleTranscriber(apiKey, vocab)
 	default:
 		return NewDeepgramTranscriber(apiKey)
 	}

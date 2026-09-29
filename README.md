@@ -82,9 +82,37 @@ LLM_PROVIDER=groq
 LLM_API_KEY=your_llm_api_key
 
 # Optional: path to a business glossary JSON file ({ "terms": [{ "term": "CR", "expansion": "Change Request", ... }] }).
-# Defaults to an embedded glossary.
+# Defaults to an embedded glossary. The glossary feeds BOTH the AI summary (LLM
+# prompt normalization) and speech recognition (phrase biasing + normalization).
 BUSINESS_GLOSSARY_PATH=/path/to/glossary.json
 ```
+
+The glossary drives two layers:
+
+1. **LLM summarization** — terms/aliases/expansions are injected into the
+   summary prompt so MOM output uses canonical forms.
+2. **Speech recognition (Google STT)** — each term is biased via
+   SpeechAdaptation phrase hints. Boost tiers: exact identifiers (digits) = 20,
+   short all-caps acronyms (e.g. `POSM`) = 18, other terms = 15, spelled-out
+   expansions = 10.
+
+Optional per-term STT fields:
+
+```json
+{
+  "term": "POSM",
+  "expansion": "Point of Sale Material",
+  "stt_normalize": ["positive", "padsam"]
+}
+```
+
+- `stt_hints`: extra spellings to bias toward (e.g. exact identifiers like
+  `"PADM2-158069"` or unusually-pronounced vendor names). Biasing only.
+- `stt_normalize`: transcript forms rewritten to the canonical `term` after
+  recognition (stable partials/finals only). Curate carefully — replacement is
+  a literal substring rewrite, so never add short or common words
+  (e.g. do NOT add `"CA"` to normalize to `"CR"`; it would corrupt ordinary
+  text).
 
 ### Database Setup
 

@@ -18,6 +18,12 @@ type GlossaryTerm struct {
 	Aliases     []string `json:"aliases,omitempty"`
 	Expansion   string   `json:"expansion,omitempty"`
 	Description string   `json:"description,omitempty"`
+	// STTHints are exact spellings to bias speech recognition toward (e.g.
+	// identifiers like "PADM2-158069", vendor names pronounced unusually).
+	STTHints []string `json:"stt_hints,omitempty"`
+	// STTNormalize are transcript forms to rewrite to Term after recognition
+	// (e.g. mishearings like "positive" -> "POSM"). Curated and unambiguous.
+	STTNormalize []string `json:"stt_normalize,omitempty"`
 }
 
 // Glossary is the full set of regulated terms loaded at startup.

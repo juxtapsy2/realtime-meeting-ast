@@ -90,7 +90,7 @@ func main() {
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
 	mux.HandleFunc("/api/transcript/", handleTranscript(meetingService))
 
-	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey))
+	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey, buildSTTVocabulary(glossary)))
 
 	handler := corsMiddleware(mux)
 
@@ -212,8 +212,25 @@ func handleTranscript(svc *meetings.Service) http.HandlerFunc {
 	}
 }
 
-func handleWebSocket(hub *realtime.Hub, svc *meetings.Service, sttProvider string, sttAPIKey string) http.HandlerFunc {
+func handleWebSocket(hub *realtime.Hub, svc *meetings.Service, sttProvider string, sttAPIKey string, vocab transcription.Vocabulary) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, svc, w, r, sttProvider, sttAPIKey)
+		realtime.HandleWebSocket(hub, svc, w, r, sttProvider, sttAPIKey, vocab)
 	}
+}
+
+// buildSTTVocabulary converts the business glossary into STT phrase biasing and
+// transcript normalization inputs. Hint and normalization choices per term come
+// from the glossary's stt_hints/stt_normalize fields; term + expansion are
+// always biased.
+func buildSTTVocabulary(glossary intelligence.Glossary) transcription.Vocabulary {
+	terms := make([]transcription.VocabularyTerm, 0, len(glossary.Terms))
+	for _, t := range glossary.Terms {
+		terms = append(terms, transcription.VocabularyTerm{
+			Term:         t.Term,
+			Expansion:    t.Expansion,
+			STTHints:     t.STTHints,
+			STTNormalize: t.STTNormalize,
+		})
+	}
+	return transcription.NewVocabulary(terms)
 }

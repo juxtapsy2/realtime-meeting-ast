@@ -46,7 +46,8 @@
       "term": "POSM",
       "aliases": ["posm"],
       "expansion": "Point of Sale Material",
-      "description": "Marketing materials displayed at the point of sale."
+      "description": "Marketing materials displayed at the point of sale.",
+      "stt_normalize": ["positive", "padsam"]
     },
     {
       "term": "DMS",
@@ -100,19 +101,23 @@
       "term": "Infosys",
       "aliases": ["infosys", "info sys"],
       "expansion": "Infosys",
-      "description": "Vendor/company name; keep as-is."
+      "description": "Vendor/company name; keep as-is.",
+      "stt_normalize": ["info sys", "infosy"]
     },
     {
       "term": "Vxceed",
       "aliases": ["vxceed", "Vxceed Technology"],
       "expansion": "Vxceed",
-      "description": "Vendor/company name; keep as-is."
+      "description": "Vendor/company name; keep as-is.",
+      "stt_hints": ["vexceed"],
+      "stt_normalize": ["vexceed"]
     },
     {
       "term": "Solar",
       "aliases": ["solar", "sola"],
       "expansion": "Solar",
-      "description": "Vendor/company name; keep as-is."
+      "description": "Vendor/company name; keep as-is.",
+      "stt_normalize": ["sola"]
     },
     {
       "term": "BSG",
@@ -136,7 +141,8 @@
       "term": "Coca-Cola",
       "aliases": ["Coca", "Coca Cola", "coca-cola"],
       "expansion": "Coca-Cola",
-      "description": "Customer/brand name; keep as-is."
+      "description": "Customer/brand name; keep as-is.",
+      "stt_normalize": ["coca cola"]
     },
     {
       "term": "CCVN",
