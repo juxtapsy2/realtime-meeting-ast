@@ -119,6 +119,7 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
               transcript={transcript}
               partialText=""
               showEmptyHint={false}
+              meetingStart={meeting.started_at}
             />
           )}
         </div>
@@ -144,22 +145,28 @@ function SummaryPanel({ summary, meeting }: { summary: MeetingSummary; meeting: 
       {summary.mom_entries && summary.mom_entries.length > 0 ? (
         <div>
           <h3 className="text-sm font-medium text-gray-500 mb-1">Minutes of Meeting</h3>
-          <div className="text-sm text-gray-900 whitespace-pre-line font-mono bg-gray-50 border border-gray-200 rounded-lg p-3">
-            {momDate} {summary.title || meeting.title} MOM:
-            {summary.mom_entries.map((entry) => (
-              <span key={entry.id}>
-                {`\n[${entry.id}] ${entry.title}: ${entry.status}.`}
-                {(entry.actions || entry.eta || entry.assignee) && (
-                  <>
-                    {`\n\n  Actions: `}
-                    {[entry.actions, entry.assignee ? `(${entry.assignee})` : null, entry.eta ? `ETA: ${entry.eta}` : null]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </>
-                )}
-                {'\n'}
-              </span>
-            ))}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <p className="text-sm font-semibold text-gray-900 mb-2">
+              {momDate} {summary.title || meeting.title} MOM:
+            </p>
+            <div className="space-y-2 text-sm">
+              {summary.mom_entries.map((entry) => (
+                <div key={entry.id}>
+                  <p className="text-gray-900">
+                    <span className="text-blue-500">•</span>{' '}
+                    <span className="font-semibold">{entry.title}:</span> {entry.status}.
+                  </p>
+                  {(entry.actions || entry.eta || entry.assignee) && (
+                    <p className="pl-4 mt-0.5 text-gray-600">
+                      <span className="font-medium text-gray-700">Actions:</span>{' '}
+                      {[entry.actions, entry.assignee ? `(${entry.assignee})` : null, entry.eta ? `ETA: ${entry.eta}` : null]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       ) : (

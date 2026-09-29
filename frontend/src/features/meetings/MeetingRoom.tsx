@@ -231,6 +231,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
           <TranscriptPanel
             transcript={transcript}
             partialText={partialText}
+            meetingStart={meeting.started_at}
           />
         </div>
 
