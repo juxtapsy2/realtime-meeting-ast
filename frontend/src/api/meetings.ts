@@ -40,6 +40,15 @@ export async function fetchMeeting(id: number): Promise<Meeting> {
   return data.meeting;
 }
 
+export async function regenerateSummary(meetingId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/meetings/${meetingId}/summary`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error('Failed to start summary generation');
+  }
+}
+
 export async function createMeeting(title: string, projectId?: number): Promise<Meeting> {
   const response = await fetch(`${API_BASE}/meetings`, {
     method: 'POST',

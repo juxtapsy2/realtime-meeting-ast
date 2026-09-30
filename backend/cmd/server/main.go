@@ -196,6 +196,12 @@ func handleMeetingByID(svc *meetings.Service) http.HandlerFunc {
 			svc.UpdateMeeting(w, r)
 		case http.MethodDelete:
 			svc.DeleteMeeting(w, r)
+		case http.MethodPost:
+			if strings.HasSuffix(r.URL.Path, "/summary") {
+				svc.RegenerateSummary(w, r)
+				return
+			}
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Meeting, TranscriptEvent, MeetingSummary } from '../../types';
-import { fetchTranscript, fetchMeeting } from '../../api/meetings';
+import { fetchTranscript, fetchMeeting, regenerateSummary } from '../../api/meetings';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
 
@@ -12,6 +12,7 @@ interface MeetingHistoryProps {
 export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const [transcript, setTranscript] = useState<TranscriptEvent[]>([]);
   const [summary, setSummary] = useState<MeetingSummary | null>(meeting.summary || null);
+  const [regenerating, setRegenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,7 +60,20 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   // receive it live over the WebSocket listener instead of polling REST.
   const handleMeetingSummary = useCallback((data: MeetingSummary) => {
     setSummary(data);
+    setRegenerating(false);
   }, []);
+
+  const handleRegenerate = useCallback(async () => {
+    setRegenerating(true);
+    setError(null);
+    try {
+      await regenerateSummary(meeting.id);
+    } catch (err) {
+      setRegenerating(false);
+      setError('Failed to start summary generation');
+      console.error(err);
+    }
+  }, [meeting.id]);
 
   useWebSocket({
     meetingId: meeting.id,
@@ -129,7 +143,13 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
             <h2 className="text-lg font-medium text-gray-900">Meeting Summary</h2>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            {summary ? <SummaryPanel summary={summary} meeting={meeting} /> : <SummaryPending />}
+            {summary ? (
+              <SummaryPanel summary={summary} meeting={meeting} />
+            ) : regenerating ? (
+              <SummaryPending />
+            ) : (
+              <SummaryMissing onGenerate={handleRegenerate} />
+            )}
           </div>
         </div>
       </div>
@@ -267,6 +287,23 @@ function SummaryPending() {
       <div className="mt-3 flex justify-center">
         <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
       </div>
+    </div>
+  );
+}
+
+function SummaryMissing({ onGenerate }: { onGenerate: () => void }) {
+  return (
+    <div className="py-8 text-center">
+      <p className="text-gray-600 text-sm">No summary was generated for this meeting.</p>
+      <p className="text-gray-400 text-xs mt-1">
+        The transcript was preserved; you can generate the summary now.
+      </p>
+      <button
+        onClick={onGenerate}
+        className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      >
+        Generate Summary
+      </button>
     </div>
   );
 }
