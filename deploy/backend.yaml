@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: meeting-ast
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: backend
+          image: ghcr.io/juxtapsy2/realtime-meeting-ast/backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            # Cluster overrides: point at the in-cluster postgres; the GCP SA is
+            # mounted from the gcp-sa secret, not referenced from the host path.
+            - name: DATABASE_URL
+              value: postgres://postgres:postgres@postgres:5432/meeting_ast?sslmode=disable
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /run/secrets/gcp-service-account.json
+            - name: CONTAINER
+              value: "1"
+          volumeMounts:
+            - name: gcp-sa
+              mountPath: /run/secrets/gcp-service-account.json
+              subPath: gcp-service-account.json
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: gcp-sa
+          secret:
+            secretName: gcp-sa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: meeting-ast
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080

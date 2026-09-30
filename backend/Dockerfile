@@ -16,9 +16,10 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 COPY --from=builder /app/server .
-# The server loads .env at startup from CWD/exe-dir; bake it in so the container
-# is self-sufficient regardless of where `docker compose up` is invoked from.
-COPY .env /root/.env
+
+# Runtime config and credentials MUST NOT be baked into the image.
+# They come from environment variables / mounted secrets (docker compose env_file,
+# Kubernetes Secret + volume).
 
 EXPOSE 8080
 
