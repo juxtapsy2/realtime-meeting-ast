@@ -228,20 +228,24 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 		return "", err
 	}
 
-	if len(response.Choices) == 0 {
-		var apiErr struct {
-			Error struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"error"`
+	if len(response.Choices) > 0 {
+		content := strings.TrimSpace(response.Choices[0].Message.Content)
+		if content == "" {
+			return "", fmt.Errorf("LLM returned empty response (status %s)", resp.Status)
 		}
-		if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
-			return "", fmt.Errorf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
-		}
-		return "", fmt.Errorf("no response from LLM (status %s)", resp.Status)
+		return content, nil
 	}
 
-	return response.Choices[0].Message.Content, nil
+	var apiErr struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
+		return "", fmt.Errorf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
+	}
+	return "", fmt.Errorf("no response from LLM (status %s)", resp.Status)
 }
 
 func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStatePatch, error) {

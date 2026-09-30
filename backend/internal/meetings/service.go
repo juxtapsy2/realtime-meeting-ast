@@ -250,6 +250,33 @@ func (s *Service) ResumeMeeting(id int) error {
 	return nil
 }
 
+// generateSummaryWithRetry calls the intelligence provider with bounded retry
+// and backoff. LLM/network failures are typically transient (rate limits,
+// timeouts, empty responses), so a couple of retries usually recover the
+// summary without blocking transcription.
+func (s *Service) generateSummaryWithRetry(ctx context.Context, meetingID int, input intelligence.FinalizationInput) (intelligence.MeetingSummary, error) {
+	const maxAttempts = 3
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		summary, err := s.intelligence.FinalizeMeeting(ctx, input)
+		if err == nil {
+			return summary, nil
+		}
+		lastErr = err
+		if attempt == maxAttempts {
+			break
+		}
+		log.Printf("Meeting %d: summary attempt %d/%d failed: %v; retrying", meetingID, attempt, maxAttempts, err)
+		select {
+		case <-time.After(time.Duration(attempt) * time.Second):
+		case <-ctx.Done():
+			return intelligence.MeetingSummary{}, ctx.Err()
+		}
+	}
+	return intelligence.MeetingSummary{}, lastErr
+}
+
 // finalizeMeetingAsync generates and persists the meeting summary in the
 // background so transcription/client flow is not blocked.
 func (s *Service) finalizeMeetingAsync(meetingID int) {
@@ -260,7 +287,7 @@ func (s *Service) finalizeMeetingAsync(meetingID int) {
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 		defer cancel()
 
 		segments, err := s.GetTranscriptSegments(meetingID)
@@ -294,7 +321,7 @@ func (s *Service) finalizeMeetingAsync(meetingID int) {
 			input.Title = meeting.Title
 		}
 
-		summary, err := s.intelligence.FinalizeMeeting(ctx, input)
+		summary, err := s.generateSummaryWithRetry(ctx, meetingID, input)
 		if err != nil {
 			log.Printf("Meeting %d: failed to finalize summary: %v", meetingID, err)
 			return
@@ -367,6 +394,49 @@ func (s *Service) GetMeetingByID(id int) (*types.MeetingInfo, error) {
 		Title:  meeting.Title,
 		Status: meeting.Status,
 	}, nil
+}
+
+// RegenerateSummary triggers background summary generation for a completed
+// meeting that has no summary yet (e.g. a previous generation attempt failed).
+// It is intentionally a no-go when a summary already exists.
+func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
+	id, err := extractIDFromPath(r.URL.Path)
+	if err != nil {
+		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
+		return
+	}
+
+	meeting, err := s.repo.GetByID(id)
+	if err != nil {
+		http.Error(w, "Meeting not found", http.StatusNotFound)
+		return
+	}
+
+	if meeting.Summary != nil {
+		http.Error(w, "Meeting already has a summary", http.StatusConflict)
+		return
+	}
+
+	segments, err := s.repo.GetTranscript(id)
+	if err != nil {
+		http.Error(w, "Failed to load transcript", http.StatusInternalServerError)
+		return
+	}
+	if len(segments) == 0 {
+		http.Error(w, "Meeting has no transcript to summarize", http.StatusBadRequest)
+		return
+	}
+
+	if s.intelligence == nil {
+		http.Error(w, "AI summarization is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	s.finalizeMeetingAsync(id)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "generating"})
 }
 
 func extractIDFromPath(path string) (int, error) {
