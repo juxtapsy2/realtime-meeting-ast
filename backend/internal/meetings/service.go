@@ -19,20 +19,47 @@ type Broadcaster interface {
 	BroadcastToMeeting(meetingID int, eventType string, data interface{})
 }
 
+// ProviderResolver returns the intelligence provider to use for a meeting,
+// based on the meeting's owner and their provider settings. A nil provider (or
+// an error) means intelligence is unavailable for that meeting; the meeting and
+// its transcript are unaffected.
+type ProviderResolver func(meetingID int, ownerEmail string) (intelligence.IntelligenceProvider, error)
+
 type Service struct {
-	repo         *Repository
-	broadcaster  Broadcaster
-	intelligence intelligence.IntelligenceProvider
-	glossary     intelligence.Glossary
+	repo        *Repository
+	broadcaster Broadcaster
+	glossary    intelligence.Glossary
+	// resolveProvider is nil when intelligence is disabled entirely. It is a
+	// resolver rather than a fixed provider because each meeting resolves its
+	// own selection at call time, so a configuration change applies to the next
+	// meeting without a restart.
+	resolveProvider ProviderResolver
 }
 
-func NewService(repo *Repository, broadcaster Broadcaster, intelligence intelligence.IntelligenceProvider, glossary intelligence.Glossary) *Service {
+func NewService(repo *Repository, broadcaster Broadcaster, resolver ProviderResolver, glossary intelligence.Glossary) *Service {
 	return &Service{
-		repo:         repo,
-		broadcaster:  broadcaster,
-		intelligence: intelligence,
-		glossary:     glossary,
+		repo:            repo,
+		broadcaster:     broadcaster,
+		glossary:        glossary,
+		resolveProvider: resolver,
 	}
+}
+
+// intelProviderFor resolves the LLM provider for a meeting. It returns nil when
+// no resolver is configured, when the resolver reports intelligence as
+// unavailable, or when resolution fails; callers treat that as "no summary"
+// rather than an error.
+func (s *Service) intelProviderFor(meetingID int, ownerEmail string) intelligence.IntelligenceProvider {
+	resolve := s.resolveProvider
+	if resolve == nil {
+		return nil
+	}
+	p, err := resolve(meetingID, ownerEmail)
+	if err != nil {
+		log.Printf("Meeting %d: no intelligence provider available: %v", meetingID, err)
+		return nil
+	}
+	return p
 }
 
 type CreateMeetingRequest struct {
@@ -64,8 +91,9 @@ func (s *Service) CreateMeeting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meeting := &Meeting{
-		Title:     req.Title,
-		ProjectID: req.ProjectID,
+		Title:      req.Title,
+		OwnerEmail: OwnerEmailFromContext(r.Context()),
+		ProjectID:  req.ProjectID,
 	}
 
 	if err := s.repo.Create(meeting); err != nil {
@@ -213,8 +241,8 @@ func (s *Service) EndMeeting(id int) error {
 
 	s.broadcaster.BroadcastToMeeting(id, "meeting.ended", meeting)
 
-	if s.intelligence != nil {
-		s.finalizeMeetingAsync(id)
+	if p := s.intelProviderFor(id, meeting.OwnerEmail); p != nil {
+		s.finalizeMeetingAsync(p, id)
 	}
 
 	return nil
@@ -254,12 +282,12 @@ func (s *Service) ResumeMeeting(id int) error {
 // and backoff. LLM/network failures are typically transient (rate limits,
 // timeouts, empty responses), so a couple of retries usually recover the
 // summary without blocking transcription.
-func (s *Service) generateSummaryWithRetry(ctx context.Context, meetingID int, input intelligence.FinalizationInput) (intelligence.MeetingSummary, error) {
+func (s *Service) generateSummaryWithRetry(ctx context.Context, p intelligence.IntelligenceProvider, meetingID int, input intelligence.FinalizationInput) (intelligence.MeetingSummary, error) {
 	const maxAttempts = 3
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		summary, err := s.intelligence.FinalizeMeeting(ctx, input)
+		summary, err := p.FinalizeMeeting(ctx, input)
 		if err == nil {
 			return summary, nil
 		}
@@ -278,8 +306,9 @@ func (s *Service) generateSummaryWithRetry(ctx context.Context, meetingID int, i
 }
 
 // finalizeMeetingAsync generates and persists the meeting summary in the
-// background so transcription/client flow is not blocked.
-func (s *Service) finalizeMeetingAsync(meetingID int) {
+// background so transcription/client flow is not blocked. The provider is
+// passed explicitly so a concurrent provider swap cannot nil the call.
+func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meetingID int) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -321,7 +350,7 @@ func (s *Service) finalizeMeetingAsync(meetingID int) {
 			input.Title = meeting.Title
 		}
 
-		summary, err := s.generateSummaryWithRetry(ctx, meetingID, input)
+		summary, err := s.generateSummaryWithRetry(ctx, p, meetingID, input)
 		if err != nil {
 			log.Printf("Meeting %d: failed to finalize summary: %v", meetingID, err)
 			return
@@ -390,9 +419,10 @@ func (s *Service) GetMeetingByID(id int) (*types.MeetingInfo, error) {
 		return nil, err
 	}
 	return &types.MeetingInfo{
-		ID:     meeting.ID,
-		Title:  meeting.Title,
-		Status: meeting.Status,
+		ID:         meeting.ID,
+		Title:      meeting.Title,
+		OwnerEmail: meeting.OwnerEmail,
+		Status:     meeting.Status,
 	}, nil
 }
 
@@ -427,12 +457,13 @@ func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.intelligence == nil {
+	p := s.intelProviderFor(id, meeting.OwnerEmail)
+	if p == nil {
 		http.Error(w, "AI summarization is not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	s.finalizeMeetingAsync(id)
+	s.finalizeMeetingAsync(p, id)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

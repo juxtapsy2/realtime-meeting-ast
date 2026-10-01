@@ -21,8 +21,8 @@ func (r *Repository) DB() *sql.DB {
 
 func (r *Repository) Create(meeting *Meeting) error {
 	query := `
-		INSERT INTO meetings (title, project_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO meetings (title, owner_email, project_id, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id`
 
 	now := time.Now()
@@ -32,8 +32,16 @@ func (r *Repository) Create(meeting *Meeting) error {
 		meeting.Status = string(MeetingStatusPending)
 	}
 
+	// An empty owner is stored as SQL NULL so "no owner" stays distinguishable
+	// from an empty string, and such meetings fall back to platform defaults.
+	var owner *string
+	if meeting.OwnerEmail != "" {
+		owner = &meeting.OwnerEmail
+	}
+
 	return r.db.QueryRow(query,
 		meeting.Title,
+		owner,
 		meeting.ProjectID,
 		meeting.Status,
 		meeting.CreatedAt,
@@ -43,16 +51,18 @@ func (r *Repository) Create(meeting *Meeting) error {
 
 func (r *Repository) GetByID(id int) (*Meeting, error) {
 	query := `
-		SELECT id, title, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
+		SELECT id, title, owner_email, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
 		FROM meetings
 		WHERE id = $1`
 
 	meeting := &Meeting{}
+	var owner sql.NullString
 	var transcript []byte
 	var summary []byte
 	err := r.db.QueryRow(query, id).Scan(
 		&meeting.ID,
 		&meeting.Title,
+		&owner,
 		&meeting.ProjectID,
 		&meeting.Status,
 		&meeting.StartedAt,
@@ -68,6 +78,7 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get meeting: %w", err)
 	}
+	meeting.OwnerEmail = owner.String
 
 	if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
 		return nil, err
@@ -86,7 +97,7 @@ func (r *Repository) List(limit, offset int) ([]*Meeting, int, error) {
 	}
 
 	query := `
-		SELECT id, title, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
+		SELECT id, title, owner_email, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
 		FROM meetings
 		ORDER BY created_at DESC, id DESC
 		LIMIT $1 OFFSET $2`
@@ -100,11 +111,13 @@ func (r *Repository) List(limit, offset int) ([]*Meeting, int, error) {
 	var meetings []*Meeting
 	for rows.Next() {
 		meeting := &Meeting{}
+		var owner sql.NullString
 		var transcript []byte
 		var summary []byte
 		err := rows.Scan(
 			&meeting.ID,
 			&meeting.Title,
+			&owner,
 			&meeting.ProjectID,
 			&meeting.Status,
 			&meeting.StartedAt,
@@ -117,6 +130,7 @@ func (r *Repository) List(limit, offset int) ([]*Meeting, int, error) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan meeting: %w", err)
 		}
+		meeting.OwnerEmail = owner.String
 		if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
 			return nil, 0, fmt.Errorf("failed to parse meeting %d: %w", meeting.ID, err)
 		}

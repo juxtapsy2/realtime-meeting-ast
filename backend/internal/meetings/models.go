@@ -8,8 +8,13 @@ import (
 )
 
 type Meeting struct {
-	ID         int                     `json:"id"`
-	Title      string                  `json:"title"`
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	// OwnerEmail is the authenticated user who created the meeting. It
+	// determines which STT/LLM providers and keys apply to the meeting. It is
+	// deliberately not serialized: meetings are visible to every allowlisted
+	// user, so ownership is exposed only through the admin API.
+	OwnerEmail string                  `json:"-"`
 	ProjectID  *int                    `json:"project_id,omitempty"`
 	Status     string                  `json:"status"`
 	StartedAt  *time.Time              `json:"started_at,omitempty"`
