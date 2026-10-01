@@ -12,7 +12,7 @@ jobs:
       # login session, so Docker cannot write creds to the macOS keychain
       # (err: User interaction is not allowed, -25308). Point DOCKER_CONFIG at a
       # throwaway dir so credentials are kept in a plain config.json instead.
-      DOCKER_CONFIG: ${{ runner.temp }}/docker
+      DOCKER_CONFIG: ${{ github.workspace }}/.docker-config
     steps:
       - uses: actions/checkout@v4
 
