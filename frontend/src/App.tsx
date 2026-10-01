@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Meeting } from './types';
+import { AuthGate } from './features/auth/AuthGate';
 import { MeetingList } from './features/meetings/MeetingList';
 import { MeetingRoom } from './features/meetings/MeetingRoom';
 import { MeetingHistory } from './features/meetings/MeetingHistory';
@@ -34,4 +35,12 @@ function App() {
   );
 }
 
-export default App;
+function AppRoot() {
+  return (
+    <AuthGate>
+      <App />
+    </AuthGate>
+  );
+}
+
+export default AppRoot;

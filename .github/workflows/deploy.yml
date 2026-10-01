@@ -45,6 +45,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cluster configuration is sourced from GitHub secrets/variables, NOT from
+      # the machine's local ./.env. Non-secret runtime config lives in repo
+      # variables (vars.*); credentials in secrets. Values that are unset in
+      # GitHub are simply omitted, and the backend falls back to its defaults.
+      - name: Refresh cluster secrets from GitHub config
+        env:
+          PORT: ${{ vars.PORT }}
+          STT_PROVIDER: ${{ vars.STT_PROVIDER }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_REDIRECT_URL: ${{ vars.GOOGLE_OAUTH_REDIRECT_URL }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          STT_API_KEY: ${{ secrets.STT_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          AUTH_HMAC_SECRET: ${{ secrets.AUTH_HMAC_SECRET }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          envfile="$(mktemp)"
+          write_env() {
+            if [ -n "${!1+x}" ]; then
+              printf '%s=%s\n' "$1" "${!1}" >> "$envfile"
+            else
+              echo "app-env: $1 not set in GitHub config; omitting"
+            fi
+          }
+          for key in PORT STT_PROVIDER LLM_PROVIDER LLM_MODEL GOOGLE_CLOUD_PROJECT \
+                     GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_REDIRECT_URL ALLOWED_EMAILS \
+                     STT_API_KEY LLM_API_KEY AUTH_HMAC_SECRET GOOGLE_OAUTH_CLIENT_SECRET; do
+            write_env "$key"
+          done
+
+          if [ -s "$envfile" ]; then
+            kubectl create secret generic app-env --from-env-file="$envfile" -n meeting-ast \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "app-env: no keys configured; leaving existing secret untouched"
+          fi
+
+          if [ -n "${GOOGLE_APPLICATION_CREDENTIALS+x}" ]; then
+            gcpfile="$(mktemp)"
+            printf '%s\n' "$GOOGLE_APPLICATION_CREDENTIALS" > "$gcpfile"
+            kubectl create secret generic gcp-sa \
+              --from-file=gcp-service-account.json="$gcpfile" -n meeting-ast \
+              --dry-run=client -o yaml | kubectl apply -f -
+            rm -f "$gcpfile"
+          fi
+          rm -f "$envfile"
+
       - name: Deploy backend
         run: |
           kubectl -n meeting-ast set image deployment/backend \

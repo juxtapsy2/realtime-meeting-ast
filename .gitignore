@@ -52,3 +52,7 @@ backend/server
 
 # GCP service account (never commit)
 secrets/
+
+deploy/macos/*
+
+scripts/*

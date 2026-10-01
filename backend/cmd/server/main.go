@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/user/realtime-meeting-ast/backend/internal/auth"
 	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
 	"github.com/user/realtime-meeting-ast/backend/internal/realtime"
@@ -84,7 +89,31 @@ func main() {
 
 	meetingService := meetings.NewService(meetingRepo, hub, intelProvider, glossary)
 
+	allowedEmails := auth.ParseAllowed(os.Getenv("ALLOWED_EMAILS"))
+	authSecret := getEnv("AUTH_HMAC_SECRET", "")
+	authenticator := auth.New([]byte(authSecret), allowedEmails, sessionTTL)
+	if !authenticator.Enabled() {
+		log.Println("AUTH: ALLOWED_EMAILS is empty; access control is DISABLED")
+	}
+	if authSecret == "" {
+		log.Println("AUTH: AUTH_HMAC_SECRET is empty; using an ephemeral secret (sessions reset on restart)")
+	}
+
+	googleClient := auth.NewGoogleClient(
+		os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
+		os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
+		os.Getenv("GOOGLE_OAUTH_REDIRECT_URL"),
+	)
+	if authenticator.Enabled() && !googleClient.Configured() {
+		log.Println("AUTH: access control enabled but Google OAuth credentials are missing; login is unavailable")
+	}
+
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/auth/google/start", handleGoogleAuthStart(authenticator, googleClient))
+	mux.HandleFunc("/api/auth/google/callback", handleGoogleAuthCallback(authenticator, googleClient))
+	mux.HandleFunc("/api/auth/logout", handleAuthLogout)
+	mux.HandleFunc("/api/auth/me", handleAuthMe(authenticator))
 
 	mux.HandleFunc("/api/meetings", handleMeetings(meetingService))
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
@@ -92,7 +121,7 @@ func main() {
 
 	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, cfg.STTProvider, cfg.STTAPIKey, buildSTTVocabulary(glossary)))
 
-	handler := corsMiddleware(mux)
+	handler := corsMiddleware(authMiddleware(authenticator, mux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -133,6 +162,8 @@ type Config struct {
 	LLMAPIKey   string
 }
 
+const sessionTTL = 7 * 24 * time.Hour
+
 func loadConfig() Config {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -172,6 +203,195 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authMiddleware gates every request except the auth endpoints themselves.
+// When the allowlist is empty the gate is disabled entirely so local
+// development stays friction-free. Expired/missing/invalid cookies receive a
+// generic 401 (no information about the allowlist is leaked).
+func authMiddleware(a *auth.Authenticator, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.Enabled() || strings.HasPrefix(r.URL.Path, "/api/auth/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		c, err := r.Cookie(auth.CookieName)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if _, err := a.Verify(c.Value); err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+const oauthStateCookie = "oauth_state"
+
+// handleGoogleAuthStart kicks off the authorization-code flow. The state
+// value doubles as a signed CSRF token: it travels both in the callback
+// query parameter and in a short-lived HttpOnly cookie, and the callback
+// requires both to match a cryptographically valid signature.
+func handleGoogleAuthStart(a *auth.Authenticator, gc *auth.GoogleClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !gc.Configured() {
+			http.Error(w, "Login unavailable: Google OAuth is not configured", http.StatusServiceUnavailable)
+			return
+		}
+		state, err := a.IssueState(randomState(), 10*time.Minute)
+		if err != nil {
+			log.Printf("AUTH: failed to issue OAuth state: %v", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		authURL, err := gc.Start(state)
+		if err != nil {
+			log.Printf("AUTH: failed to build Google authorize URL: %v", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     oauthStateCookie,
+			Value:    state,
+			Path:     "/api/auth/google/callback",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   isSecureRequest(r),
+			MaxAge:   600,
+		})
+		http.Redirect(w, r, authURL, http.StatusFound)
+	}
+}
+
+func handleGoogleAuthCallback(a *auth.Authenticator, gc *auth.GoogleClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		deny := func() {
+			http.SetCookie(w, sessionCookie(r, "", -1))
+			clearOAuthState(w, r)
+			http.Redirect(w, r, "/", http.StatusFound)
+		}
+
+		if r.URL.Query().Get("error") != "" {
+			log.Printf("AUTH: Google returned an OAuth error: %s", r.URL.Query().Get("error"))
+			deny()
+			return
+		}
+		state := r.URL.Query().Get("state")
+		stateCookie, err := r.Cookie(oauthStateCookie)
+		if err != nil || stateCookie.Value != state {
+			log.Println("AUTH: OAuth callback state mismatch")
+			deny()
+			return
+		}
+if _, err := a.VerifyState(state); err != nil {
+				log.Printf("AUTH: OAuth callback state invalid: %v", err)
+				deny()
+				return
+			}
+
+		user, err := gc.Exchange(r.Context(), r.URL.Query().Get("code"))
+		if err != nil {
+			log.Printf("AUTH: Google token exchange failed: %v", err)
+			deny()
+			return
+		}
+		if !a.Allowed(user.Email) {
+			log.Printf("AUTH: denied access for non-allowlisted Google account %s", user.Email)
+			http.SetCookie(w, sessionCookie(r, "", -1))
+			clearOAuthState(w, r)
+			http.Redirect(w, r, "/?error=denied", http.StatusFound)
+			return
+		}
+
+		token, err := a.Issue(user.Email)
+		if err != nil {
+			log.Printf("AUTH: failed to issue session token for %s: %v", user.Email, err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, sessionCookie(r, token, sessionTTL))
+		clearOAuthState(w, r)
+		http.Redirect(w, r, "/", http.StatusFound)
+	}
+}
+
+func clearOAuthState(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookie,
+		Value:    "",
+		Path:     "/api/auth/google/callback",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecureRequest(r),
+		MaxAge:   -1,
+	})
+}
+
+func randomState() string {
+	buf := make([]byte, 18)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, sessionCookie(r, "", -1))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleAuthMe(a *auth.Authenticator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.Enabled() {
+			writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "email": ""})
+			return
+		}
+		c, err := r.Cookie(auth.CookieName)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		email, err := a.Verify(c.Value)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "email": email})
+	}
+}
+
+func sessionCookie(r *http.Request, token string, ttl time.Duration) *http.Cookie {
+	return &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecureRequest(r),
+		MaxAge:   int(ttl.Seconds()),
+	}
+}
+
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("Failed to encode JSON response: %v", err)
+	}
 }
 
 func handleMeetings(svc *meetings.Service) http.HandlerFunc {
