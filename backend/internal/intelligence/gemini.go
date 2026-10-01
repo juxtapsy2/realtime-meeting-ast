@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -24,12 +23,13 @@ type GeminiIntelligence struct {
 	glossary Glossary
 }
 
-func NewGeminiIntelligence(apiKey string, glossary Glossary) (*GeminiIntelligence, error) {
+// NewGeminiIntelligence returns an IntelligenceProvider backed by the Gemini
+// API. model overrides the provider default when non-empty.
+func NewGeminiIntelligence(apiKey, model string, glossary Glossary) (*GeminiIntelligence, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("Gemini API key is required")
 	}
 
-	model := os.Getenv("LLM_MODEL")
 	if model == "" {
 		model = "gemini-flash-latest"
 	}

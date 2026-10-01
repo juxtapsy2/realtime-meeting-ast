@@ -130,15 +130,18 @@ const (
 )
 
 // NewProvider creates a new intelligence provider
-func NewProvider(providerType Provider, apiKey string, glossary Glossary) (IntelligenceProvider, error) {
+// NewProvider builds the intelligence provider for a single selection. The
+// model is passed explicitly so each user's own configuration is honoured
+// without mutating process-wide state; an empty model uses the provider default.
+func NewProvider(providerType Provider, apiKey, model string, glossary Glossary) (IntelligenceProvider, error) {
 	switch providerType {
 	case ProviderGemini:
-		return NewGeminiIntelligence(apiKey, glossary)
+		return NewGeminiIntelligence(apiKey, model, glossary)
 	case ProviderGroq:
-		return NewGroqIntelligence(apiKey, glossary)
+		return NewGroqIntelligence(apiKey, model, glossary)
 	case ProviderOpenAI:
-		return NewOpenAIIntelligence(apiKey, glossary)
+		return NewOpenAIIntelligence(apiKey, model, glossary)
 	default:
-		return NewOpenAIIntelligence(apiKey, glossary)
+		return NewOpenAIIntelligence(apiKey, model, glossary)
 	}
 }

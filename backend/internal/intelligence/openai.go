@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -22,23 +21,25 @@ type OpenAIIntelligence struct {
 	glossary Glossary
 }
 
-func NewOpenAIIntelligence(apiKey string, glossary Glossary) (*OpenAIIntelligence, error) {
-	return newOpenAICompatible(apiKey, "https://api.openai.com/v1", "gpt-4o-mini", glossary)
+// NewOpenAIIntelligence returns an IntelligenceProvider backed by the OpenAI
+// API. model overrides the provider default when non-empty.
+func NewOpenAIIntelligence(apiKey, model string, glossary Glossary) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.openai.com/v1", "gpt-4o-mini", model, glossary)
 }
 
 // NewGroqIntelligence returns an IntelligenceProvider backed by the Groq API.
 // Groq exposes an OpenAI-compatible chat completions endpoint, so it reuses the
-// same client and parsing as the OpenAI provider.
-func NewGroqIntelligence(apiKey string, glossary Glossary) (*OpenAIIntelligence, error) {
-	return newOpenAICompatible(apiKey, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", glossary)
+// same client and parsing as the OpenAI provider. model overrides the provider
+// default when non-empty.
+func NewGroqIntelligence(apiKey, model string, glossary Glossary) (*OpenAIIntelligence, error) {
+	return newOpenAICompatible(apiKey, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", model, glossary)
 }
 
-func newOpenAICompatible(apiKey, baseURL, defaultModel string, glossary Glossary) (*OpenAIIntelligence, error) {
+func newOpenAICompatible(apiKey, baseURL, defaultModel, model string, glossary Glossary) (*OpenAIIntelligence, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is required")
 	}
 
-	model := os.Getenv("LLM_MODEL")
 	if model == "" {
 		model = defaultModel
 	}
