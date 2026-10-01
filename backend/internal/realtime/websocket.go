@@ -37,7 +37,13 @@ type CommandMessage struct {
 	MeetingID int    `json:"meeting_id"`
 }
 
-func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, sttProvider string, sttAPIKey string, vocab transcription.Vocabulary) {
+// STTResolver returns the transcription provider and API key to use for a
+// meeting, based on the meeting owner and their provider settings. It is
+// resolved per connection so a user's own keys take effect for their meetings
+// while everyone else keeps using the platform defaults.
+type STTResolver func(meetingID int, ownerEmail string) (provider string, apiKey string, err error)
+
+func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter, r *http.Request, resolveSTT STTResolver, vocab transcription.Vocabulary) {
 	meetingID, err := extractMeetingID(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Invalid meeting ID", http.StatusBadRequest)
@@ -74,6 +80,18 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 	if info.Status == "completed" {
 		go client.writePump()
 		go client.readPump(nil, meetingSvc, cancel)
+		return
+	}
+	// Resolve the STT provider/keys for the meeting owner at connect time. A
+	// resolution failure (e.g. an undecryptable user key) is surfaced to the
+	// client instead of silently falling back to the platform account.
+	sttProvider, sttAPIKey, err := resolveSTT(meetingID, info.OwnerEmail)
+	if err != nil {
+		log.Printf("Meeting %d: failed to resolve STT configuration: %v", meetingID, err)
+		http.Error(w, "Transcription is not configured for this meeting", http.StatusServiceUnavailable)
+		hub.Unregister(client)
+		conn.Close()
+		cancel()
 		return
 	}
 
