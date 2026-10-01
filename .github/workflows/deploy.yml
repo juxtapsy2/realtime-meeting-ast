@@ -8,25 +8,22 @@ jobs:
   build-push:
     runs-on: [self-hosted, macOS, ARM64]
     env:
-      # A runner started as a background LaunchAgent is not attached to a GUI
-      # login session, so Docker cannot write creds to the macOS keychain
-      # (err: User interaction is not allowed, -25308). Point DOCKER_CONFIG at a
-      # throwaway dir so credentials are kept in a plain config.json instead.
+      # macOS keychain denies writes from a background LaunchAgent runner
+      # (err: User interaction is not allowed, -25308), and Docker Desktop's
+      # CLI forces credsStore=osxkeychain regardless of config. So we never
+      # run `docker login`: a plaintext config.json is seeded with the GHCR
+      # auth, and buildx uses it directly. DOCKER_CONFIG scopes it per-run.
       DOCKER_CONFIG: ${{ github.workspace }}/.docker-config
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure docker config dir
-        run: mkdir -p "$DOCKER_CONFIG"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: juxtapsy2
-          # PAT with read:packages + write:packages. GITHUB_TOKEN cannot push
-          # to this user-namespaced registry.
-          password: ${{ secrets.GHCR_PAT }}
+      - name: Configure GHCR credentials (plaintext, no keychain)
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          auth="$(printf 'juxtapsy2:%s' "$GHCR_PAT" | base64 | tr -d '\n')"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$DOCKER_CONFIG/config.json"
 
       - name: Build and push backend
         uses: docker/build-push-action@v6
