@@ -110,6 +110,9 @@ jobs:
         run: |
           kubectl -n meeting-ast set image deployment/backend \
             backend=ghcr.io/juxtapsy2/realtime-meeting-ast/backend:${{ github.sha }}
+          # Restart even when the image is unchanged: secrets/env are applied
+          # to running pods, and `kubectl apply` of a Secret does not restart.
+          kubectl -n meeting-ast rollout restart deployment/backend
           kubectl -n meeting-ast rollout status deployment/backend --timeout=180s
 
       - name: Deploy frontend
