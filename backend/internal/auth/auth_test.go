@@ -129,3 +129,24 @@ func TestTokenTypesAreSeparated(t *testing.T) {
 		t.Error("session token accepted as a state token")
 	}
 }
+
+func TestSetAllowedRevokesImmediately(t *testing.T) {
+	a := New([]byte("secret"), []string{"alice@example.com", "bob@example.com"}, time.Hour)
+	token, _ := a.Issue("bob@example.com")
+
+	a.SetAllowed([]string{"alice@example.com"})
+	if a.Allowed("bob@example.com") {
+		t.Error("revoked email still allowed")
+	}
+	if _, err := a.Verify(token); err == nil {
+		t.Error("session token for revoked email still verified")
+	}
+	if !a.Enabled() {
+		t.Error("allowlist still has one member, Enabled() should be true")
+	}
+
+	a.SetAllowed(nil)
+	if a.Enabled() {
+		t.Error("empty allowlist must disable the gate")
+	}
+}

@@ -20,18 +20,36 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 const CookieName = "auth_token"
 
+// Role names, ordered from least to most privileged.
+const (
+	RoleUser       = "user"
+	RoleAdmin      = "admin"
+	RoleSuperAdmin = "superadmin"
+)
+
 // Authenticator issues and verifies signed session tokens against an email
-// allowlist.
+// allowlist, and distinguishes the admin and superadmin roles. The user
+// allowlist and admin list can be replaced at runtime (as the settings store
+// changes); all reads are mutex-guarded.
+//
+// The superadmin is configured only through the SUPERADMIN_EMAIL environment
+// variable: it is not stored in the database, so a compromised admin API
+// caller cannot promote themselves above it.
 type Authenticator struct {
-	secret  []byte
-	allowed map[string]struct{}
-	ttl     time.Duration
-	now     func() time.Time
+	secret []byte
+	ttl    time.Duration
+	now    func() time.Time
+
+	mu         sync.RWMutex
+	allowed    map[string]struct{}
+	admins     map[string]struct{}
+	superAdmin string
 }
 
 // New returns an Authenticator. allowed emails are normalized (trimmed,
@@ -47,6 +65,7 @@ func New(secret []byte, allowed []string, ttl time.Duration) *Authenticator {
 	return &Authenticator{
 		secret:  secret,
 		allowed: set,
+		admins:  map[string]struct{}{},
 		ttl:     ttl,
 		now:     time.Now,
 	}
@@ -82,13 +101,109 @@ func NormalizeEmail(email string) string {
 // should consider the gate open (deny-all would lock everyone out, and
 // bypass keeps local development friction-free).
 func (a *Authenticator) Enabled() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return len(a.allowed) > 0
 }
 
-// Allowed reports whether the email is on the allowlist.
+// Allowed reports whether the email may hold a session. The superadmin is
+// implicitly allowed: it is configured above the allowlist, so locking it out
+// would remove the last account able to fix the allowlist.
 func (a *Authenticator) Allowed(email string) bool {
-	_, ok := a.allowed[NormalizeEmail(email)]
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	normalized := NormalizeEmail(email)
+	if a.superAdmin != "" && a.superAdmin == normalized {
+		return true
+	}
+	_, ok := a.allowed[normalized]
 	return ok
+}
+
+// SetAllowed replaces the user allowlist at runtime. Existing session tokens
+// are re-checked against the new list on every verification, so revocations
+// take effect immediately.
+func (a *Authenticator) SetAllowed(emails []string) {
+	set := make(map[string]struct{}, len(emails))
+	for _, e := range emails {
+		if n := NormalizeEmail(e); n != "" {
+			set[n] = struct{}{}
+		}
+	}
+	a.mu.Lock()
+	a.allowed = set
+	a.mu.Unlock()
+}
+
+// SetAdmins replaces the admin allowlist at runtime.
+func (a *Authenticator) SetAdmins(emails []string) {
+	set := make(map[string]struct{}, len(emails))
+	for _, e := range emails {
+		if n := NormalizeEmail(e); n != "" {
+			set[n] = struct{}{}
+		}
+	}
+	a.mu.Lock()
+	a.admins = set
+	a.mu.Unlock()
+}
+
+// IsAdmin reports whether the email holds the admin role (or the superadmin
+// role, which is strictly above admin). Admins may monitor the service through
+// the admin API; a valid session (allowlisted user) is still required first.
+func (a *Authenticator) IsAdmin(email string) bool {
+	return a.Role(email) != RoleUser
+}
+
+// IsSuperAdmin reports whether the email is the single env-configured
+// superadmin. Only the superadmin may change settings, user provider
+// configuration, and the admin list.
+func (a *Authenticator) IsSuperAdmin(email string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.superAdmin != "" && a.superAdmin == NormalizeEmail(email)
+}
+
+// Role returns the effective role for an email. The superadmin is not
+// required to also appear in the database-backed admin list.
+func (a *Authenticator) Role(email string) string {
+	normalized := NormalizeEmail(email)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.superAdmin != "" && a.superAdmin == normalized {
+		return RoleSuperAdmin
+	}
+	if _, ok := a.admins[normalized]; ok {
+		return RoleAdmin
+	}
+	return RoleUser
+}
+
+// Allowlist returns a snapshot of the user allowlist. Used for reporting and
+// for unioning users into the admin view.
+func (a *Authenticator) Allowlist() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]string, 0, len(a.allowed))
+	for email := range a.allowed {
+		out = append(out, email)
+	}
+	return out
+}
+
+// SuperAdmin returns the configured superadmin email ("" when unset).
+func (a *Authenticator) SuperAdmin() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.superAdmin
+}
+
+// SetSuperAdmin sets the single superadmin email. An empty value clears it.
+func (a *Authenticator) SetSuperAdmin(email string) {
+	normalized := NormalizeEmail(email)
+	a.mu.Lock()
+	a.superAdmin = normalized
+	a.mu.Unlock()
 }
 
 // Issue signs a session token for the email (normalized). The token embeds
