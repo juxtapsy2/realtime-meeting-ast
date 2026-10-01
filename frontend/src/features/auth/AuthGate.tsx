@@ -20,7 +20,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     fetchCurrentUser()
       .then((user) => {
         if (cancelled) return;
-        setCurrentUser(user);
+        setCurrentUser(user ? user.email : null);
         setState(user !== null ? 'authed' : 'denied');
       })
       .catch(() => {
