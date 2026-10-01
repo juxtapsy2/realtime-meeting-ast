@@ -145,10 +145,12 @@ Target structure:
 │   │   ├── intelligence/
 │   │   ├── knowledge/
 │   │   ├── retrieval/
+│   │   ├── providerconfig/   # Per-user STT/LLM provider + key resolution
+│   │   ├── secretbox/        # Encryption for stored user API keys
+│   │   ├── settings/         # Runtime platform settings + admin roles
 │   │   └── storage/
+│   │       └── migrations/   # Numbered SQL migrations, embedded and applied on boot
 │   │
-│   └── migrations/
-│
 ├── frontend/
 │   └── src/
 │       ├── api/
@@ -630,6 +632,30 @@ LLM_PROVIDER=ollama
 EMBEDDING_PROVIDER=local
 ```
 
+Provider selection is resolved per user, not globally:
+
+```text
+platform defaults (deployment secrets: Google STT, Groq LLM)
+    +
+per-user override (user_provider_settings.use_own_keys)
+    ↓
+effective STT/LLM selection for that user's meetings
+```
+
+A user's own provider and model win per field, and any field they left empty
+falls back to the platform default. The admin UI edits this per user, so there
+is no second platform-wide control to change the same thing.
+
+A meeting records its owner, so transcription (per WebSocket connection) and
+summarization (per meeting) resolve the same selection. When a user's own key
+cannot be decrypted, resolution fails and the failure is surfaced; it never
+silently falls back to the platform account.
+
+API keys are never written in plaintext to the database. Platform keys exist
+only in deployment secrets, and per-user keys are sealed with AES-256-GCM using
+a key derived from `AUTH_HMAC_SECRET`, bound to their field so a ciphertext
+cannot be replayed between the STT and LLM slots.
+
 ---
 
 # 20. Persistence Architecture
@@ -653,7 +679,6 @@ workspaces
 projects
 meetings
 participants
-transcript_segments
 decisions
 action_items
 issues
@@ -663,7 +688,22 @@ knowledge_chunks
 embeddings
 ```
 
-Exact schema belongs in migrations/code rather than this document.
+Provider configuration, access control, and their audit trail:
+
+```text
+app_settings            # non-secret deployment defaults and the access allowlist
+user_provider_settings  # per-user STT/LLM choice; API keys encrypted at rest
+admin_emails            # database-managed admins
+admin_audit_log         # who changed what, with the role they held
+schema_migrations       # applied migration versions
+```
+
+API keys are never stored in plaintext: platform keys live only in deployment
+secrets, and per-user keys are encrypted with AES-256-GCM using a key derived
+from `AUTH_HMAC_SECRET`.
+
+Exact schema belongs in `backend/internal/storage/migrations/*.sql` rather than
+this document.
 
 ---
 
@@ -883,6 +923,26 @@ Authorization must be checked server-side.
 Realtime connections require the same authorization guarantees as REST endpoints.
 
 A valid WebSocket connection must not imply access to arbitrary meeting IDs.
+
+Roles are checked server-side on every admin request:
+
+```text
+user        → meetings only
+admin       → monitor access and operational state (read-only)
+superadmin  → settings, admin list, and per-user API keys (all mutations)
+```
+
+The superadmin is configured only through the `SUPERADMIN_EMAIL` environment
+variable and is implicitly allowlisted, so the account able to repair the
+allowlist can never be locked out. Regular admins live in the database
+(`admin_emails`) and are granted only by the superadmin: no environment
+variable or CI step can grant or revoke the admin role. Every configuration
+change is written to the audit log with the acting role.
+
+The superadmin edits the access allowlist through a dedicated email-tag control:
+clearing it removes the database override and reverts to the deployment value,
+and an empty deployment value leaves the gate open, so that action is confirmed
+rather than applied on a single click.
 
 ---
 

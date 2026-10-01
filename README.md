@@ -23,8 +23,11 @@ This project follows the architecture defined in `ARCHITECTURE.md`:
 │   │   ├── realtime/        # WebSocket hub and connections
 │   │   ├── transcription/   # STT provider interfaces
 │   │   ├── intelligence/    # AI analysis providers
-│   │   └── storage/         # Database layer
-│   └── migrations/
+│   │   ├── providerconfig/  # Per-user STT/LLM provider + key resolution
+│   │   ├── secretbox/       # AES-256-GCM encryption for stored user API keys
+│   │   ├── settings/        # Runtime platform settings + admin roles
+│   │   └── storage/         # Database layer and versioned migrations
+│       └── migrations/      # Numbered SQL migrations, embedded and applied on boot
 ├── frontend/
 │   └── src/
 │       ├── api/             # API client functions
@@ -75,11 +78,27 @@ This project follows the architecture defined in `ARCHITECTURE.md`:
 PORT=8080
 DATABASE_URL=postgres://localhost:5432/meeting_ast?sslmode=disable
 
-# AI Providers
+# AI Providers (platform defaults, from environment/deployment secrets)
 STT_PROVIDER=google
 STT_API_KEY=your_stt_api_key
 LLM_PROVIDER=groq
 LLM_API_KEY=your_llm_api_key
+
+# Access control: comma-separated allowlist of emails allowed to use the
+# service. Empty means the gate is disabled. API keys are NEVER stored here or
+# in the database: each user either uses the platform keys above, or their own
+# keys, which the superadmin stores encrypted from the Admin page.
+ALLOWED_EMAILS=you@example.com,teammate@example.com
+
+# Single superadmin, configured ONLY through the environment. Sits above the
+# database-managed admins and is implicitly allowlisted so it can never be
+# locked out. Only this role can change settings, admins, or user API keys.
+SUPERADMIN_EMAIL=you@example.com
+
+# Signs session cookies AND derives the AES-256-GCM key that encrypts per-user
+# API keys in the database. If empty, sessions reset on restart and storing
+# user keys is disabled. Changing it makes stored user keys undecryptable.
+AUTH_HMAC_SECRET=change_me_to_a_long_random_string
 
 # Optional: path to a business glossary JSON file ({ "terms": [{ "term": "CR", "expansion": "Change Request", ... }] }).
 # Defaults to an embedded glossary. The glossary feeds BOTH the AI summary (LLM
@@ -121,6 +140,7 @@ Optional per-term STT fields:
 createdb meeting_ast
 
 # The application will run migrations automatically on startup
+# (backend/internal/storage/migrations/*.sql, tracked in schema_migrations)
 ```
 
 ### Running the Application
