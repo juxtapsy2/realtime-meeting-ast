@@ -71,7 +71,7 @@ jobs:
           # The superadmin is a single account configured only through the
           # environment; it sits above the database-managed admins and is
           # implicitly allowlisted so it can never be locked out.
-          SUPERADMIN_EMAIL: ${{ vars.SUPERADMIN_EMAIL }}
+          SUPERADMIN_EMAIL: ${{ secrets.SUPERADMIN_EMAIL }}
           STT_API_KEY: ${{ secrets.STT_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           AUTH_HMAC_SECRET: ${{ secrets.AUTH_HMAC_SECRET }}
