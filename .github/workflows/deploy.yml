@@ -68,6 +68,10 @@ jobs:
           GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_REDIRECT_URL: ${{ vars.GOOGLE_OAUTH_REDIRECT_URL }}
           ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          # The superadmin is a single account configured only through the
+          # environment; it sits above the database-managed admins and is
+          # implicitly allowlisted so it can never be locked out.
+          SUPERADMIN_EMAIL: ${{ vars.SUPERADMIN_EMAIL }}
           STT_API_KEY: ${{ secrets.STT_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           AUTH_HMAC_SECRET: ${{ secrets.AUTH_HMAC_SECRET }}
@@ -85,7 +89,8 @@ jobs:
           }
           for key in PORT STT_PROVIDER LLM_PROVIDER LLM_MODEL GOOGLE_CLOUD_PROJECT \
                      GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_REDIRECT_URL ALLOWED_EMAILS \
-                     STT_API_KEY LLM_API_KEY AUTH_HMAC_SECRET GOOGLE_OAUTH_CLIENT_SECRET; do
+                     SUPERADMIN_EMAIL STT_API_KEY LLM_API_KEY AUTH_HMAC_SECRET \
+                     GOOGLE_OAUTH_CLIENT_SECRET; do
             write_env "$key"
           done
 
@@ -105,6 +110,12 @@ jobs:
             rm -f "$gcpfile"
           fi
           rm -f "$envfile"
+
+      # Administrator roles are managed in the database (admin_emails table) from
+      # the admin page, which the superadmin populates. The superadmin itself is
+      # the SUPERADMIN_EMAIL env var applied above, so there is no admin seeding
+      # step and no ADMIN_EMAILS secret: the workflow no longer writes to app
+      # tables at all. Schema changes ship as backend migrations.
 
       - name: Deploy backend
         run: |
