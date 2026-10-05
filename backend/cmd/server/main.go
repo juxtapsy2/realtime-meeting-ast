@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -185,21 +184,29 @@ func main() {
 	mux.HandleFunc("/api/meetings/", handleMeetingByID(meetingService))
 	mux.HandleFunc("/api/transcript/", handleTranscript(meetingService))
 
-	// Admin surface. Admins may MONITOR (read-only, no secrets returned);
-	// only the superadmin may change settings, admins, or user API keys.
+	// Admin surface: admins monitor operational state, edit the access
+	// allowlist, and manage their own provider row; the superadmin
+	// additionally changes platform provider settings, the administrator list,
+	// and any user's keys. No read returns a secret value.
 	mux.HandleFunc("/api/admin/monitor", adminAuth(authenticator, handleAdminMonitor(db.DB(), settingsStore, providerStore, authenticator)))
-	mux.HandleFunc("/api/admin/settings", adminAuth(authenticator, superAdminOnly(authenticator, handleAdminSettings(settingsStore, authenticator, func() {
+	// Admins and superadmins both reach this route; canWriteSetting decides
+	// per setting (admins: the access list, superadmin: platform provider).
+	mux.HandleFunc("/api/admin/settings", adminAuth(authenticator, handleAdminSettings(settingsStore, authenticator, func() {
 		authenticator.SetAllowed(auth.ParseAllowed(settingsStore.GetDefault(settings.KeyAllowedEmails, "")))
 		// Provider and model overrides take effect on the next connection or
 		// meeting; the platform API keys are unchanged (deployment secrets).
 		providerStore.SetPlatform(platformSelection())
-	}))))
+	})))
 	mux.HandleFunc("/api/admin/admins", adminAuth(authenticator, superAdminOnly(authenticator, handleAdminUsers(settingsStore, authenticator))))
 	// /api/admin/users serves the list on GET and per-user updates on
 	// PUT/POST/DELETE, so the exact path and the sub-path share one handler.
 	userProviders := handleAdminUserProvider(providerStore, settingsStore, authenticator, sealBox)
 	mux.HandleFunc("/api/admin/users", adminAuth(authenticator, superAdminOnly(authenticator, handleAdminUserProviders(providerStore, authenticator, userProviders))))
 	mux.HandleFunc("/api/admin/users/", adminAuth(authenticator, superAdminOnly(authenticator, userProviders)))
+	// Self-service provider settings: any signed-in user manages their own
+	// providers, model, and keys. The identity is taken from the session, so
+	// the route cannot be aimed at anyone else.
+	mux.HandleFunc("/api/user/provider", handleSelfProvider(providerStore, settingsStore, authenticator, sealBox))
 
 	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, providerStore, buildSTTVocabulary(glossary)))
 
@@ -588,7 +595,6 @@ func handleAdminMonitor(db *sql.DB, store *settings.Store, providers *providerco
 			admins = []string{}
 		}
 
-		platform := providers.Platform()
 		users, err := providers.List(ctx, knownUsers(a))
 		if err != nil {
 			log.Printf("ADMIN: failed to load user provider settings: %v", err)
@@ -601,17 +607,10 @@ func handleAdminMonitor(db *sql.DB, store *settings.Store, providers *providerco
 			"database":  dbStatus,
 			"meetings":  meetingCount,
 			"auth_gate": authGate,
-			// provider_store.Platform() is read at request time, so a provider or
-			// model changed by the superadmin is reflected immediately.
-			"platform": map[string]any{
-				"stt_provider": platform.STTProvider,
-				"stt_key_set":  platform.STTAPIKey != "",
-				"llm_provider": platform.LLMProvider,
-				"llm_model":    platform.LLMModel,
-				"llm_key_set":  platform.LLMAPIKey != "",
-				"google_stt":   platform.STTProvider == string(transcription.ProviderGoogle),
-				"own_keys_ok":  providers.OwnKeysAvailable(),
-			},
+			// platformConfig reads Platform() at request time, so a provider or
+			// model changed by the superadmin is reflected immediately, and it
+			// redacts the platform API keys, which must never leave the server.
+			"platform":    platformConfig(providers),
 			"admins":      admins,
 			"superadmin":  a.SuperAdmin(),
 			"viewer":      viewer,
@@ -729,34 +728,19 @@ func handleAdminUserProviders(store *providerconfig.Store, a *auth.Authenticator
 		writeJSON(w, http.StatusOK, map[string]any{
 			"users":       users,
 			"own_keys_ok": store.OwnKeysAvailable(),
-			"platform":    store.Platform(),
+			"platform":    platformConfig(store),
 		})
 	}
-}
-
-// adminUserProviderRequest is the write-only update payload for one user. API
-// keys are only ever written: omitting a key leaves the stored key untouched,
-// and clear_* removes it.
-type adminUserProviderRequest struct {
-	Email       string `json:"email"`
-	UseOwnKeys  *bool  `json:"use_own_keys"`
-	STTProvider string `json:"stt_provider"`
-	STTAPIKey   string `json:"stt_api_key"`
-	ClearSTTKey bool   `json:"clear_stt_key"`
-	LLMProvider string `json:"llm_provider"`
-	LLMModel    string `json:"llm_model"`
-	LLMAPIKey   string `json:"llm_api_key"`
-	ClearLLMKey bool   `json:"clear_llm_key"`
 }
 
 // handleAdminUserProvider creates, updates, or resets one user's provider
 // configuration. Superadmin only. The body may arrive sealed (see
 // internal/sealedbox) because it can carry API keys; keys are encrypted before
-// storage and are never echoed back.
+// storage and are never echoed back. The write itself is shared with the
+// self-service handler (see applyProviderUpdate).
 func handleAdminUserProvider(store *providerconfig.Store, settingsStore *settings.Store, a *auth.Authenticator, sealBox *sealedbox.Keypair) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		acting, _ := r.Context().Value(adminEmailCtxKey{}).(string)
-		ctx := r.Context()
 
 		// DELETE /api/admin/users/{email} resets a user to the platform defaults.
 		if r.Method == http.MethodDelete {
@@ -768,18 +752,7 @@ func handleAdminUserProvider(store *providerconfig.Store, settingsStore *setting
 				http.Error(w, "A valid email is required", http.StatusBadRequest)
 				return
 			}
-			if err := store.Delete(ctx, email); err != nil {
-				log.Printf("ADMIN %s: failed to reset providers for %s: %v", acting, email, err)
-				http.Error(w, "Failed to reset user configuration", http.StatusInternalServerError)
-				return
-			}
-			log.Printf("ADMIN %s: reset %s to platform provider defaults", acting, email)
-			// Removing stored keys is a configuration change, so it is audited
-			// like any other. The audit stores the target email, never a key.
-			if err := settingsStore.Audit(ctx, settings.ActionClear, acting, a.Role(acting), "USER_PROVIDERS:"+email); err != nil {
-				log.Printf("ADMIN %s: failed to audit reset of %s: %v", acting, email, err)
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"reset": email})
+			applyProviderReset(w, r, store, settingsStore, a, acting, email)
 			return
 		}
 
@@ -788,19 +761,8 @@ func handleAdminUserProvider(store *providerconfig.Store, settingsStore *setting
 			return
 		}
 
-		// The body is size limited before decoding because a sealed envelope
-		// still arrives as one JSON object, and an oversized one is bad input
-		// whether it is encrypted or not.
-		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
-		if err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
 		var body adminUserProviderRequest
-		// Every failure here is bad client input: a body that is not the
-		// expected JSON, or an envelope that does not decrypt for this key.
-		if err := sealBox.OpenInto(raw, &body); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+		if !readProviderRequest(w, r, sealBox, &body) {
 			return
 		}
 		email := auth.NormalizeEmail(body.Email)
@@ -808,61 +770,7 @@ func handleAdminUserProvider(store *providerconfig.Store, settingsStore *setting
 			http.Error(w, "A valid email is required", http.StatusBadRequest)
 			return
 		}
-		if !store.OwnKeysAvailable() && (body.STTAPIKey != "" || body.LLMAPIKey != "") {
-			http.Error(w, "Cannot store user API keys: AUTH_HMAC_SECRET is not configured", http.StatusServiceUnavailable)
-			return
-		}
-
-		// Preserve the current toggle when the caller does not send one.
-		useOwn := false
-		current, err := store.Get(ctx, email)
-		switch {
-		case body.UseOwnKeys != nil:
-			useOwn = *body.UseOwnKeys
-		case err == nil:
-			useOwn = current.UseOwnKeys
-		case err != sql.ErrNoRows:
-			log.Printf("ADMIN %s: failed to load providers for %s: %v", acting, email, err)
-			http.Error(w, "Failed to load user configuration", http.StatusInternalServerError)
-			return
-		}
-
-		if err := store.Save(ctx, providerconfig.SaveInput{
-			Email:       email,
-			UseOwnKeys:  useOwn,
-			STTProvider: body.STTProvider,
-			STTAPIKey:   body.STTAPIKey,
-			ClearSTTKey: body.ClearSTTKey,
-			LLMProvider: body.LLMProvider,
-			LLMModel:    body.LLMModel,
-			LLMAPIKey:   body.LLMAPIKey,
-			ClearLLMKey: body.ClearLLMKey,
-			UpdatedBy:   acting,
-		}); err != nil {
-			log.Printf("ADMIN %s: failed to save providers for %s: %v", acting, email, err)
-			switch {
-			case errors.Is(err, providerconfig.ErrNoEncryptionKey):
-				http.Error(w, "Cannot store user API keys: encryption is not configured", http.StatusServiceUnavailable)
-				return
-			case errors.Is(err, providerconfig.ErrOwnKeysNeedKey):
-				http.Error(w, "Enabling own keys requires at least one STT or LLM API key", http.StatusBadRequest)
-				return
-			}
-			// Other failures (constraint violations, connectivity) are server-side
-			// problems; the cause stays in the log, not in the response.
-			http.Error(w, "Failed to save user configuration", http.StatusInternalServerError)
-			return
-		}
-
-		action := settings.ActionSet
-		if !useOwn {
-			action = settings.ActionClear
-		}
-		log.Printf("ADMIN %s (%s): updated provider settings for %s (own_keys=%v)", acting, a.Role(acting), email, useOwn)
-		if err := settingsStore.Audit(ctx, action, acting, a.Role(acting), "USER_PROVIDERS:"+email); err != nil {
-			log.Printf("ADMIN: failed to record audit for user providers %s: %v", email, err)
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"email": email, "use_own_keys": useOwn})
+		applyProviderUpdate(w, r, store, settingsStore, a, acting, email, body)
 	}
 }
 
@@ -879,11 +787,32 @@ func canonicalAllowlist(value string) string {
 	return strings.Join(auth.ParseAllowed(trimmed), ",")
 }
 
-// handleAdminSettings applies setting updates. Superadmin only (enforced by
-// superAdminOnly). No API key is a settable setting: platform keys live in
-// deployment secrets and per-user keys are stored encrypted via
-// /api/admin/users. An empty value clears an override, reverting to the env
-// baseline.
+// canWriteSetting reports whether a role may change a named runtime setting.
+//
+// The access allowlist belongs to administrators: their job is deciding who
+// may use the service, so they may edit the list themselves. The platform
+// provider and model choose which account every default user is billed
+// against, so those stay with the superadmin.
+func canWriteSetting(role, name string) bool {
+	if _, ok := settings.Find(name); !ok {
+		return false
+	}
+	switch role {
+	case auth.RoleSuperAdmin:
+		return true
+	case auth.RoleAdmin:
+		return name == settings.KeyAllowedEmails.Name
+	default:
+		return false
+	}
+}
+
+// handleAdminSettings applies setting updates. The route requires an admin
+// session, and canWriteSetting decides per setting: admins may change the
+// access list, only the superadmin may change platform provider or model.
+// No API key is a settable setting: platform keys live in deployment secrets
+// and per-user keys are stored encrypted via /api/admin/users. An empty value
+// clears an override, reverting to the env baseline.
 func handleAdminSettings(store *settings.Store, a *auth.Authenticator, apply func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut {
@@ -892,6 +821,7 @@ func handleAdminSettings(store *settings.Store, a *auth.Authenticator, apply fun
 		}
 		email, _ := r.Context().Value(adminEmailCtxKey{}).(string)
 		ctx := r.Context()
+		role := a.Role(email)
 
 		var payload map[string]string
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
@@ -902,9 +832,17 @@ func handleAdminSettings(store *settings.Store, a *auth.Authenticator, apply fun
 			http.Error(w, "No settings provided", http.StatusBadRequest)
 			return
 		}
+		// The whole request is authorised before anything is written, so a
+		// payload mixing an allowed and a denied setting is refused rather
+		// than half applied.
 		for name := range payload {
 			if _, ok := settings.Find(name); !ok {
 				http.Error(w, fmt.Sprintf("Unknown setting %q", name), http.StatusBadRequest)
+				return
+			}
+			if !canWriteSetting(role, name) {
+				log.Printf("ADMIN %s (%s): denied write to %s; superadmin required", email, role, name)
+				http.Error(w, "Superadmin role required to change platform provider settings", http.StatusForbidden)
 				return
 			}
 		}
@@ -923,7 +861,6 @@ func handleAdminSettings(store *settings.Store, a *auth.Authenticator, apply fun
 			if strings.TrimSpace(value) == "" {
 				action = settings.ActionClear
 			}
-			role := a.Role(email)
 			if err := store.Audit(ctx, action, email, role, name); err != nil {
 				log.Printf("ADMIN: failed to record audit for %s: %v", name, err)
 			}

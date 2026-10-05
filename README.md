@@ -89,12 +89,15 @@ LLM_API_KEY=your_llm_api_key
 # Access control: comma-separated allowlist of emails allowed to use the
 # service. Empty means the gate is disabled. API keys are NEVER stored here or
 # in the database: each user either uses the platform keys above, or their own
-# keys, which the superadmin stores encrypted from the Admin page.
+# keys, which they store encrypted from Provider settings (the superadmin can
+# also manage any user's keys from the Admin page).
 ALLOWED_EMAILS=you@example.com,teammate@example.com
 
 # Single superadmin, configured ONLY through the environment. Sits above the
 # database-managed admins and is implicitly allowlisted so it can never be
-# locked out. Only this role can change settings, admins, or user API keys.
+# locked out. Only this role can change platform settings, administrators, or
+# other users' keys; admins may edit ALLOWED_EMAILS, and every user edits their
+# own providers and keys.
 SUPERADMIN_EMAIL=you@example.com
 
 # Signs session cookies AND derives the AES-256-GCM key that encrypts per-user

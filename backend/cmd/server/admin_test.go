@@ -8,12 +8,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/user/realtime-meeting-ast/backend/internal/auth"
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
+	"github.com/user/realtime-meeting-ast/backend/internal/providerconfig"
 	"github.com/user/realtime-meeting-ast/backend/internal/sealedbox"
+	"github.com/user/realtime-meeting-ast/backend/internal/settings"
 )
 
 const testSecret = "test-auth-secret"
@@ -53,17 +56,23 @@ func request(t *testing.T, a *auth.Authenticator, method, path, token string) *h
 }
 
 // The role boundary is the security-critical part of the admin plane: a
-// plain user may never reach admin endpoints, an admin may monitor but not
-// mutate, and the superadmin may do both.
+// plain user never reaches an admin endpoint, an admin reaches the routes it
+// is meant to operate (monitoring and the access list), and the superadmin
+// alone reaches the routes that mutate shared state.
+//
+// These cases cover which route a role is admitted to. What an admitted admin
+// may then write is decided per setting by canWriteSetting, which
+// TestSettingWriteRoles covers.
 func TestAdminRoleMatrix(t *testing.T) {
 	a, tokens := newTestAuthenticator(t)
 
-	monitor := adminAuth(a, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
-	settings := adminAuth(a, superAdminOnly(a, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
+	})
+	// /api/admin/monitor and /api/admin/settings admit admins;
+	// /api/admin/admins and /api/admin/users stay superadmin only.
+	adminRoute := adminAuth(a, ok)
+	superadminRoute := adminAuth(a, superAdminOnly(a, ok))
 
 	tests := []struct {
 		name    string
@@ -71,13 +80,15 @@ func TestAdminRoleMatrix(t *testing.T) {
 		token   string
 		want    int
 	}{
-		{"monitor without session", monitor, "", http.StatusUnauthorized},
-		{"monitor as user", monitor, tokens["user@example.com"], http.StatusForbidden},
-		{"monitor as admin", monitor, tokens["admin@example.com"], http.StatusOK},
-		{"monitor as superadmin", monitor, tokens["root@example.com"], http.StatusOK},
-		{"settings as admin", settings, tokens["admin@example.com"], http.StatusForbidden},
-		{"settings as superadmin", settings, tokens["root@example.com"], http.StatusOK},
-		{"settings as user", settings, tokens["user@example.com"], http.StatusForbidden},
+		{"monitor without session", adminRoute, "", http.StatusUnauthorized},
+		{"monitor as user", adminRoute, tokens["user@example.com"], http.StatusForbidden},
+		{"monitor as admin", adminRoute, tokens["admin@example.com"], http.StatusOK},
+		{"monitor as superadmin", adminRoute, tokens["root@example.com"], http.StatusOK},
+		{"settings as admin", adminRoute, tokens["admin@example.com"], http.StatusOK},
+		{"settings as superadmin", adminRoute, tokens["root@example.com"], http.StatusOK},
+		{"admins as admin", superadminRoute, tokens["admin@example.com"], http.StatusForbidden},
+		{"admins as superadmin", superadminRoute, tokens["root@example.com"], http.StatusOK},
+		{"admins as user", superadminRoute, tokens["user@example.com"], http.StatusForbidden},
 	}
 
 	for _, tc := range tests {
@@ -412,5 +423,92 @@ func TestSealedBoxPublicKeyPayload(t *testing.T) {
 	}
 	if _, err := ecdh.P256().NewPublicKey(raw); err != nil {
 		t.Fatalf("published key is not an importable P-256 point: %v", err)
+	}
+}
+
+// The settings surface is authorised per setting rather than per route: the
+// access list is an administrator's own responsibility, while the platform
+// provider and model decide which account every default user is billed
+// against, so only the superadmin may change those. Unknown names are never
+// writable by anybody.
+func TestSettingWriteRoles(t *testing.T) {
+	cases := []struct {
+		role string
+		name string
+		want bool
+	}{
+		{auth.RoleSuperAdmin, settings.KeyAllowedEmails.Name, true},
+		{auth.RoleSuperAdmin, settings.KeySTTProvider.Name, true},
+		{auth.RoleSuperAdmin, settings.KeyLLMProvider.Name, true},
+		{auth.RoleSuperAdmin, settings.KeyLLMModel.Name, true},
+		{auth.RoleAdmin, settings.KeyAllowedEmails.Name, true},
+		{auth.RoleAdmin, settings.KeySTTProvider.Name, false},
+		{auth.RoleAdmin, settings.KeyLLMProvider.Name, false},
+		{auth.RoleAdmin, settings.KeyLLMModel.Name, false},
+		{auth.RoleUser, settings.KeyAllowedEmails.Name, false},
+		{auth.RoleUser, settings.KeyLLMProvider.Name, false},
+		{auth.RoleAdmin, "LLM_API_KEY", false},
+		{auth.RoleSuperAdmin, "AUTH_HMAC_SECRET", false},
+		{auth.RoleSuperAdmin, "", false},
+	}
+	for _, tc := range cases {
+		if got := canWriteSetting(tc.role, tc.name); got != tc.want {
+			t.Errorf("canWriteSetting(%q, %q) = %v, want %v", tc.role, tc.name, got, tc.want)
+		}
+	}
+}
+
+// The platform Selection carries the API keys that resolve default users'
+// providers, and it has no JSON tags, so a handler that marshals it directly
+// would send those keys to the browser. Everything user-facing goes through
+// platformConfig, which must keep the provider detail and drop the secrets.
+func TestPlatformConfigRedactsPlatformKeys(t *testing.T) {
+	store := providerconfig.NewStore(nil, nil, providerconfig.Selection{
+		STTProvider: "google",
+		STTAPIKey:   "platform-stt-secret",
+		LLMProvider: "groq",
+		LLMAPIKey:   "platform-llm-secret",
+		LLMModel:    "openai/gpt-oss-120b",
+	})
+	raw, err := json.Marshal(platformConfig(store))
+	if err != nil {
+		t.Fatalf("json.Marshal(): %v", err)
+	}
+	for _, secret := range []string{"platform-stt-secret", "platform-llm-secret"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("platformConfig leaked %q: %s", secret, raw)
+		}
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("json.Unmarshal(): %v", err)
+	}
+	if cfg["stt_key_set"] != true || cfg["llm_key_set"] != true {
+		t.Fatalf("key_set flags = %v / %v, want both true", cfg["stt_key_set"], cfg["llm_key_set"])
+	}
+	if cfg["stt_provider"] != "google" || cfg["llm_provider"] != "groq" {
+		t.Fatalf("providers lost: %v / %v", cfg["stt_provider"], cfg["llm_provider"])
+	}
+	if cfg["own_keys_ok"] != false {
+		t.Fatalf("own_keys_ok = %v, want false with no encryption box", cfg["own_keys_ok"])
+	}
+}
+
+// The self-service endpoint must never act on an anonymous identity: when the
+// auth gate is open authMiddleware lets such requests through on non-admin
+// paths, so the handler itself is the last line of defence.
+func TestSelfProviderRequiresSessionIdentity(t *testing.T) {
+	kp, err := sealedbox.NewKeypair()
+	if err != nil {
+		t.Fatalf("sealedbox.NewKeypair(): %v", err)
+	}
+	handler := handleSelfProvider(nil, nil, nil, kp)
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/user/provider", nil)
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without session = %d, want %d", method, rec.Code, http.StatusUnauthorized)
+		}
 	}
 }

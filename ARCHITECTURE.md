@@ -657,10 +657,15 @@ only in deployment secrets, and per-user keys are sealed with AES-256-GCM using
 a key derived from `AUTH_HMAC_SECRET`, bound to their field so a ciphertext
 cannot be replayed between the STT and LLM slots.
 
+Platform keys are also never serialised to a client: `providerconfig.Selection`
+carries them in plaintext for internal resolution, so every response goes
+through a redacting helper that reports only whether a key exists.
+
 Keys are also sealed in transit. The backend publishes an ECDH P-256 public key
-at `GET /api/sealedbox/public-key`, and the Admin page encrypts the
-`PUT /api/admin/users` body with it before sending, so no request that carries
-a key is a plaintext JSON body on the server side. The envelope is
+at `GET /api/sealedbox/public-key`, and the Admin page and the Provider settings
+panel encrypt the `PUT /api/admin/users` and `PUT /api/user/provider` bodies
+with it before sending, so no request that carries a key is a plaintext JSON
+body on the server side. The envelope is
 `ECDH-P256 + HKDF-SHA256 + AES-256-GCM`, the key pair is generated per process
 because only the current request needs it, and the backend still accepts a
 plain body so a stale page or a browser without Web Crypto keeps working.
@@ -936,10 +941,23 @@ A valid WebSocket connection must not imply access to arbitrary meeting IDs.
 Roles are checked server-side on every admin request:
 
 ```text
-user        → meetings only
-admin       → monitor access and operational state (read-only)
-superadmin  → settings, admin list, and per-user API keys (all mutations)
+user        → meetings, and their own provider settings (own row only)
+admin       → monitor access, edit the access allowlist, edit their own provider row
+superadmin  → settings, admin list, and any user's provider settings (all mutations)
 ```
+
+Authorization is decided per action rather than by one blanket route check: the
+settings endpoint requires an admin session and then decides per setting
+(`canWriteSetting`), because the access list is an administrator's own
+responsibility while the platform provider and model decide which account every
+default user is billed against. A request mixing an allowed and a denied
+setting is refused before anything is written.
+
+Every user manages their own STT and LLM providers, model, and API keys through
+`GET/PUT/DELETE /api/user/provider`. The target identity always comes from the
+session, never from the request body or URL, so the endpoint has no identifier a
+caller could swap to edit somebody else; an email in the body is decoded and
+ignored. The body may be sealed like the admin update, since it can carry keys.
 
 The superadmin is configured only through the `SUPERADMIN_EMAIL` environment
 variable and is implicitly allowlisted, so the account able to repair the
@@ -948,10 +966,10 @@ allowlist can never be locked out. Regular admins live in the database
 variable or CI step can grant or revoke the admin role. Every configuration
 change is written to the audit log with the acting role.
 
-The superadmin edits the access allowlist through a dedicated email-tag control:
-clearing it removes the database override and reverts to the deployment value,
-and an empty deployment value leaves the gate open, so that action is confirmed
-rather than applied on a single click.
+An administrator edits the access allowlist through a dedicated email-tag
+control: clearing it removes the database override and reverts to the deployment
+value, and an empty deployment value leaves the gate open, so that action is
+confirmed rather than applied on a single click.
 
 ---
 

@@ -198,6 +198,49 @@ func (s *Store) Get(ctx context.Context, email string) (UserSettings, error) {
 	return s.load(ctx, email)
 }
 
+// Summary reads exactly one user's summary. Unlike List it never looks at any
+// other row, so it is the read a self-service caller is handed: a user asking
+// about their own configuration cannot be shown anyone else's. A user with no
+// stored configuration still gets a row describing the platform defaults they
+// are currently riding.
+func (s *Store) Summary(ctx context.Context, email string) (UserSummary, error) {
+	normalized := strings.ToLower(strings.TrimSpace(email))
+	if normalized == "" {
+		return UserSummary{}, errors.New("providerconfig: email is required")
+	}
+
+	platform := s.Platform()
+	row := s.db.QueryRowContext(ctx, `
+		WITH u AS (SELECT $1::varchar AS email)
+		SELECT u.email,
+		       COALESCE(s.use_own_keys, FALSE),
+		       COALESCE(s.stt_provider, ''),
+		       COALESCE(s.stt_api_key_enc, '') <> '',
+		       COALESCE(s.llm_provider, ''),
+		       COALESCE(s.llm_model, ''),
+		       COALESCE(s.llm_api_key_enc, '') <> '',
+		       COALESCE(s.updated_by, ''),
+		       s.updated_at,
+		       (SELECT COUNT(*) FROM meetings m WHERE m.owner_email = u.email)
+		FROM u
+		LEFT JOIN user_provider_settings s ON s.user_email = u.email`, normalized)
+
+	var u UserSummary
+	var updatedAt sql.NullTime
+	if err := row.Scan(&u.Email, &u.UseOwnKeys, &u.STTProvider, &u.STTKeySet,
+		&u.LLMProvider, &u.LLMModel, &u.LLMKeySet, &u.UpdatedBy, &updatedAt, &u.Meetings); err != nil {
+		return UserSummary{}, fmt.Errorf("providerconfig: summary for %s: %w", normalized, err)
+	}
+	u.Effective = platform.Source
+	if u.UseOwnKeys {
+		u.Effective = SourceUser
+	}
+	if updatedAt.Valid {
+		u.UpdatedAt = updatedAt.Time.UTC().Format(time.RFC3339)
+	}
+	return u, nil
+}
+
 func (s *Store) load(ctx context.Context, email string) (UserSettings, error) {
 	var us UserSettings
 	var updatedAt sql.NullTime
