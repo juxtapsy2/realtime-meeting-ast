@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/user/realtime-meeting-ast/backend/internal/auth"
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
+	"github.com/user/realtime-meeting-ast/backend/internal/sealedbox"
 )
 
 const testSecret = "test-auth-secret"
@@ -269,5 +273,144 @@ func TestCanonicalAllowlist(t *testing.T) {
 		if got := canonicalAllowlist(in); got != want {
 			t.Errorf("canonicalAllowlist(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// The user-provider update is the one admin body that carries API keys, so it
+// is the one the browser seals. These tests pin the decoding contract that the
+// handler relies on: a sealed body must decode to the same update a plaintext
+// body would, and an envelope for a different key must be refused.
+func newSealBox(t *testing.T) *sealedbox.Keypair {
+	t.Helper()
+	kp, err := sealedbox.NewKeypair()
+	if err != nil {
+		t.Fatalf("sealedbox.NewKeypair(): %v", err)
+	}
+	return kp
+}
+
+func sealProviderUpdate(t *testing.T, kp *sealedbox.Keypair, want adminUserProviderRequest) []byte {
+	t.Helper()
+	plaintext, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal(): %v", err)
+	}
+	env, err := sealedbox.Seal(kp, plaintext)
+	if err != nil {
+		t.Fatalf("sealedbox.Seal(): %v", err)
+	}
+	body, err := json.Marshal(map[string]any{"sealed": env})
+	if err != nil {
+		t.Fatalf("json.Marshal(): %v", err)
+	}
+	return body
+}
+
+func TestSealedProviderUpdateDecodes(t *testing.T) {
+	kp := newSealBox(t)
+	useOwn := true
+	want := adminUserProviderRequest{
+		Email:       "User@Example.com",
+		UseOwnKeys:  &useOwn,
+		STTProvider: "google",
+		STTAPIKey:   "stt-secret",
+		LLMProvider: "groq",
+		LLMModel:    "openai/gpt-oss-120b",
+		LLMAPIKey:   "llm-secret",
+		ClearLLMKey: true,
+	}
+
+	var got adminUserProviderRequest
+	if err := kp.OpenInto(sealProviderUpdate(t, kp, want), &got); err != nil {
+		t.Fatalf("OpenInto(): %v", err)
+	}
+	if got.Email != want.Email || got.STTAPIKey != want.STTAPIKey || got.LLMAPIKey != want.LLMAPIKey {
+		t.Fatalf("decoded update = %+v, want %+v", got, want)
+	}
+	if got.UseOwnKeys == nil || !*got.UseOwnKeys {
+		t.Fatal("UseOwnKeys was lost during decoding")
+	}
+	if !got.ClearLLMKey || got.LLMModel != want.LLMModel || got.STTProvider != want.STTProvider {
+		t.Fatalf("decoded update = %+v, want %+v", got, want)
+	}
+}
+
+// A stale page, or a browser without Web Crypto, still sends plain JSON.
+func TestPlaintextProviderUpdateStillDecodes(t *testing.T) {
+	kp := newSealBox(t)
+	want := adminUserProviderRequest{Email: "User@Example.com", LLMAPIKey: "llm-secret"}
+
+	body, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal(): %v", err)
+	}
+
+	var got adminUserProviderRequest
+	if err := kp.OpenInto(body, &got); err != nil {
+		t.Fatalf("OpenInto(): %v", err)
+	}
+	if got.Email != want.Email || got.LLMAPIKey != want.LLMAPIKey {
+		t.Fatalf("decoded update = %+v, want %+v", got, want)
+	}
+}
+
+func TestProviderUpdateFromAnotherSealBoxIsRejected(t *testing.T) {
+	intended := newSealBox(t)
+	other := newSealBox(t)
+	want := adminUserProviderRequest{Email: "user@example.com", LLMAPIKey: "llm-secret"}
+
+	var got adminUserProviderRequest
+	if err := other.OpenInto(sealProviderUpdate(t, intended, want), &got); !errors.Is(err, sealedbox.ErrKeyID) {
+		t.Fatalf("OpenInto() error = %v, want ErrKeyID", err)
+	}
+	if got.LLMAPIKey != "" {
+		t.Fatal("a rejected envelope still populated the update")
+	}
+}
+
+// The browser has to be able to import the published key as an uncompressed
+// P-256 point, and it has to be able to tell whether it speaks the same
+// construction as the server.
+func TestSealedBoxPublicKeyPayload(t *testing.T) {
+	kp := newSealBox(t)
+	handler := handleSealedBoxPublicKey(kp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sealedbox/public-key", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var payload struct {
+		Alg string `json:"alg"`
+		Kid string `json:"kid"`
+		Pub string `json:"pub"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(): %v", err)
+	}
+	if payload.Alg != sealedbox.Algorithm {
+		t.Fatalf("alg = %q, want %q", payload.Alg, sealedbox.Algorithm)
+	}
+	if payload.Kid != kp.ID() {
+		t.Fatalf("kid = %q, want %q", payload.Kid, kp.ID())
+	}
+	if payload.Pub != kp.PublicKeyBase64() {
+		t.Fatalf("pub = %q, want %q", payload.Pub, kp.PublicKeyBase64())
+	}
+
+	// The browser imports this value as a raw P-256 point, so it has to be a
+	// well-formed uncompressed point rather than, say, a PEM blob.
+	raw, err := base64.StdEncoding.DecodeString(payload.Pub)
+	if err != nil {
+		t.Fatalf("published key is not base64: %v", err)
+	}
+	if len(raw) != 65 || raw[0] != 0x04 {
+		t.Fatalf("published key length = %d, prefix = %#x; want 65 bytes starting 0x04", len(raw), raw[0])
+	}
+	if _, err := ecdh.P256().NewPublicKey(raw); err != nil {
+		t.Fatalf("published key is not an importable P-256 point: %v", err)
 	}
 }

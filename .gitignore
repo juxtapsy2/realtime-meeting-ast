@@ -49,6 +49,7 @@ docker-compose.override.yml
 bin/
 /bin/
 backend/server
+backend/tmptoken
 
 # GCP service account (never commit)
 secrets/

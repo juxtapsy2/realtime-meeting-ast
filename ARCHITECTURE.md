@@ -147,6 +147,7 @@ Target structure:
 │   │   ├── retrieval/
 │   │   ├── providerconfig/   # Per-user STT/LLM provider + key resolution
 │   │   ├── secretbox/        # Encryption for stored user API keys
+│   │   ├── sealedbox/        # ECDH envelope for API keys in transit
 │   │   ├── settings/         # Runtime platform settings + admin roles
 │   │   └── storage/
 │   │       └── migrations/   # Numbered SQL migrations, embedded and applied on boot
@@ -656,6 +657,14 @@ only in deployment secrets, and per-user keys are sealed with AES-256-GCM using
 a key derived from `AUTH_HMAC_SECRET`, bound to their field so a ciphertext
 cannot be replayed between the STT and LLM slots.
 
+Keys are also sealed in transit. The backend publishes an ECDH P-256 public key
+at `GET /api/sealedbox/public-key`, and the Admin page encrypts the
+`PUT /api/admin/users` body with it before sending, so no request that carries
+a key is a plaintext JSON body on the server side. The envelope is
+`ECDH-P256 + HKDF-SHA256 + AES-256-GCM`, the key pair is generated per process
+because only the current request needs it, and the backend still accepts a
+plain body so a stale page or a browser without Web Crypto keeps working.
+
 ---
 
 # 20. Persistence Architecture
@@ -962,6 +971,10 @@ Backend
 ```
 
 Provider API keys never belong in frontend bundles.
+
+Keys that do leave the browser as request bodies are sealed to the backend's
+published key first, so the plaintext exists only inside the browser and inside
+the handler that decrypts it.
 
 LLM output is also untrusted input.
 

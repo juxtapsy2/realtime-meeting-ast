@@ -25,6 +25,7 @@ This project follows the architecture defined in `ARCHITECTURE.md`:
 │   │   ├── intelligence/    # AI analysis providers
 │   │   ├── providerconfig/  # Per-user STT/LLM provider + key resolution
 │   │   ├── secretbox/       # AES-256-GCM encryption for stored user API keys
+│   │   ├── sealedbox/       # ECDH envelope for API keys sent to the backend
 │   │   ├── settings/        # Runtime platform settings + admin roles
 │   │   └── storage/         # Database layer and versioned migrations
 │       └── migrations/      # Numbered SQL migrations, embedded and applied on boot
@@ -37,6 +38,7 @@ This project follows the architecture defined in `ARCHITECTURE.md`:
 │       │   ├── transcript/
 │       │   └── intelligence/
 │       ├── hooks/           # Custom React hooks
+│       ├── lib/             # Browser seal box for API keys in transit
 │       └── types/           # TypeScript types
 └── scripts/
 ```

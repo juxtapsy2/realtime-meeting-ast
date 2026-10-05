@@ -24,6 +24,7 @@ import (
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
 	"github.com/user/realtime-meeting-ast/backend/internal/providerconfig"
 	"github.com/user/realtime-meeting-ast/backend/internal/realtime"
+	"github.com/user/realtime-meeting-ast/backend/internal/sealedbox"
 	"github.com/user/realtime-meeting-ast/backend/internal/secretbox"
 	"github.com/user/realtime-meeting-ast/backend/internal/settings"
 	"github.com/user/realtime-meeting-ast/backend/internal/storage"
@@ -164,8 +165,17 @@ func main() {
 		log.Println("AUTH: access control enabled but Google OAuth credentials are missing; login is unavailable")
 	}
 
+	// Seal box key pair for admin bodies that carry provider API keys. It is
+	// generated per process: the public half is published for the browser to
+	// seal with, the private half only decrypts here.
+	sealBox, err := sealedbox.NewKeypair()
+	if err != nil {
+		log.Fatalf("Failed to initialise seal box: %v", err)
+	}
+
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/sealedbox/public-key", handleSealedBoxPublicKey(sealBox))
 	mux.HandleFunc("/api/auth/google/start", handleGoogleAuthStart(authenticator, googleClient))
 	mux.HandleFunc("/api/auth/google/callback", handleGoogleAuthCallback(authenticator, googleClient))
 	mux.HandleFunc("/api/auth/logout", handleAuthLogout)
@@ -187,7 +197,7 @@ func main() {
 	mux.HandleFunc("/api/admin/admins", adminAuth(authenticator, superAdminOnly(authenticator, handleAdminUsers(settingsStore, authenticator))))
 	// /api/admin/users serves the list on GET and per-user updates on
 	// PUT/POST/DELETE, so the exact path and the sub-path share one handler.
-	userProviders := handleAdminUserProvider(providerStore, settingsStore, authenticator)
+	userProviders := handleAdminUserProvider(providerStore, settingsStore, authenticator, sealBox)
 	mux.HandleFunc("/api/admin/users", adminAuth(authenticator, superAdminOnly(authenticator, handleAdminUserProviders(providerStore, authenticator, userProviders))))
 	mux.HandleFunc("/api/admin/users/", adminAuth(authenticator, superAdminOnly(authenticator, userProviders)))
 
@@ -740,9 +750,10 @@ type adminUserProviderRequest struct {
 }
 
 // handleAdminUserProvider creates, updates, or resets one user's provider
-// configuration. Superadmin only. Keys are encrypted before storage and are
-// never echoed back.
-func handleAdminUserProvider(store *providerconfig.Store, settingsStore *settings.Store, a *auth.Authenticator) http.HandlerFunc {
+// configuration. Superadmin only. The body may arrive sealed (see
+// internal/sealedbox) because it can carry API keys; keys are encrypted before
+// storage and are never echoed back.
+func handleAdminUserProvider(store *providerconfig.Store, settingsStore *settings.Store, a *auth.Authenticator, sealBox *sealedbox.Keypair) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		acting, _ := r.Context().Value(adminEmailCtxKey{}).(string)
 		ctx := r.Context()
@@ -777,8 +788,18 @@ func handleAdminUserProvider(store *providerconfig.Store, settingsStore *setting
 			return
 		}
 
+		// The body is size limited before decoding because a sealed envelope
+		// still arrives as one JSON object, and an oversized one is bad input
+		// whether it is encrypted or not.
+		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+		if err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
 		var body adminUserProviderRequest
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+		// Every failure here is bad client input: a body that is not the
+		// expected JSON, or an envelope that does not decrypt for this key.
+		if err := sealBox.OpenInto(raw, &body); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}

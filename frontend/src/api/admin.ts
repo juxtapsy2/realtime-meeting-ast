@@ -1,3 +1,5 @@
+import { sealJSON } from '../lib/sealedbox';
+
 const API_BASE = '/api';
 
 export type AdminSetting = { key: string; secret: boolean; set: boolean; value: string };
@@ -108,12 +110,15 @@ export type UserProviderUpdate = {
 };
 
 // API keys are write-only: send one to set or replace it, omit to keep the
-// stored key, or set clear_*_key to remove it.
+// stored key, or set clear_*_key to remove it. The body can carry secrets, so
+// it is sealed with the backend's published key rather than sent as plain
+// JSON; this is the only admin endpoint that does so, since platform settings
+// contain no key values.
 export async function saveUserProvider(update: UserProviderUpdate): Promise<void> {
   const response = await fetch(`${API_BASE}/admin/users`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(update),
+    body: await sealJSON(update),
   });
   if (!response.ok) {
     throw await readError(response, 'Failed to save user configuration');
