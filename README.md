@@ -62,6 +62,10 @@ This project follows the architecture defined in `ARCHITECTURE.md`:
 - Issue tracking
 - Open question detection
 - Meeting state management
+- Minutes of Meeting (MOM) proposal from the transcript, or from uploaded
+  meeting documents (PDF, DOCX, PPTX, XLSX, CSV, TXT, MD) when a meeting was never
+  recorded. Legacy binary .doc files and scans without a text layer are
+  rejected with a clear error; only extracted text is stored.
 
 ## Getting Started
 

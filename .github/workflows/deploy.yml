@@ -131,3 +131,35 @@ jobs:
           kubectl -n meeting-ast set image deployment/frontend \
             frontend=ghcr.io/juxtapsy2/realtime-meeting-ast/frontend:${{ github.sha }}
           kubectl -n meeting-ast rollout status deployment/frontend --timeout=180s
+
+      # The LaunchAgent com.bill.kube-port-forward runs
+      # `kubectl port-forward svc/frontend 30080:80`, which pins ONE pod for the
+      # lifetime of the process. After a rollout replaces the pod, the agent
+      # keeps a dead stream to the old pod and only fails once traffic arrives
+      # (cloudflared then serves 521 "host down"), after which launchd restarts
+      # it. Rebind proactively here: wait for the new pod to be the only one,
+      # restart the agent so it targets the fresh pod, and verify the tunnel
+      # answers before declaring the deploy healthy.
+      - name: Rebind port-forward to new frontend pod
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            total=$(kubectl -n meeting-ast get pods -l app=frontend --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            ready=$(kubectl -n meeting-ast get pods -l app=frontend \
+              -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+              | grep -c '^True$' || true)
+            if [ "$total" = "1" ] && [ "$ready" = "1" ]; then
+              break
+            fi
+            sleep 2
+          done
+          launchctl kickstart -k "gui/$(id -u)/com.bill.kube-port-forward"
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:30080/; then
+              echo "port-forward rebind OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "port-forward still not answering after rebind" >&2
+          exit 1

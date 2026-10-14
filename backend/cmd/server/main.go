@@ -949,8 +949,16 @@ func handleMeetingByID(svc *meetings.Service) http.HandlerFunc {
 		case http.MethodPut:
 			svc.UpdateMeeting(w, r)
 		case http.MethodDelete:
+			if strings.HasSuffix(r.URL.Path, "/documents") {
+				svc.ClearMeetingDocuments(w, r)
+				return
+			}
 			svc.DeleteMeeting(w, r)
 		case http.MethodPost:
+			if strings.HasSuffix(r.URL.Path, "/documents") {
+				svc.UploadMeetingDocuments(w, r)
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/summary") {
 				svc.RegenerateSummary(w, r)
 				return

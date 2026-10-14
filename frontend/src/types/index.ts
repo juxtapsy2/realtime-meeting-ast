@@ -7,8 +7,16 @@ export interface Meeting {
   ended_at?: string;
   transcript?: TranscriptEvent[];
   summary?: MeetingSummary;
+  documents?: MeetingDocument[];
   created_at: string;
   updated_at: string;
+}
+
+export interface MeetingDocument {
+  name: string;
+  mime: string;
+  chars: number;
+  uploaded_at: string;
 }
 
 export interface MeetingSummary {

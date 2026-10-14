@@ -59,14 +59,14 @@ func (g *GeminiIntelligence) AnalyzeChunk(ctx context.Context, input AnalysisInp
 }
 
 func (g *GeminiIntelligence) FinalizeMeeting(ctx context.Context, input FinalizationInput) (MeetingSummary, error) {
-	prompt := g.buildFinalizationPrompt(input)
+	prompt := finalizationPrompt(g.glossary, input)
 
 	response, err := g.callLLM(ctx, prompt)
 	if err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to call LLM: %w", err)
 	}
 
-	summary, err := g.parseFinalizationResponse(response)
+	summary, err := parseFinalizationJSON(response)
 	if err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -106,64 +106,6 @@ Format your response as JSON:
   "issues": [{"id": "uuid", "title": "string", "description": "string", "status": "open", "source_segment_ids": ["string"]}],
   "questions": [{"id": "uuid", "question": "string", "status": "open", "source_segment_ids": ["string"]}]
 }`, string(stateJSON), input.RecentContext, input.TranscriptChunk)
-}
-
-func (g *GeminiIntelligence) buildFinalizationPrompt(input FinalizationInput) string {
-	stateJSON := "none"
-	if input.FinalState != nil {
-		if state, err := json.MarshalIndent(input.FinalState, "", "  "); err == nil {
-			stateJSON = string(state)
-		}
-	}
-
-	glossary := g.glossary.PromptSection()
-
-	return fmt.Sprintf(`You are an AI meeting assistant. Generate a final meeting summary in Minutes of Meeting (MOM) style based on the complete transcript.
-
-%s
-Final Meeting State:
-%s
-
-Full Transcript:
-%s
-
-Write the summary in this exact MOM format. One entry per discussed item:
-
-28/09/2026 %s MOM:
-[ITEM_ID] Item title: current status of the item.
-
-  Actions: next action needed, ETA: expected completion period
-
-Rules:
-- The opening line must be "DD/MM/YYYY <meeting title> MOM:" using today's date.
-- Each entry begins with the exact business identifier in square brackets when one exists (e.g. [CR_002]). Never invent or change identifiers.
-- For every entry:
-  * state the CURRENT STATUS clearly (what has been confirmed/done/decided so far).
-  * then list the NEXT ACTIONS as a single "Actions:" line.
-  * include who is responsible when mentioned, and the ETA when mentioned.
-- Use the regulated business glossary terms EXACTLY as written. Never guess or substitute similar-sounding words for glossary terms.
-- Preserve the speakers' original language. If the meeting mixed Vietnamese and English, keep that mix in each entry.
-- Keep entries terse; no commentary outside the MOM format.
-
-Return JSON only:
-{
-  "title": "meeting title",
-  "summary": "one- or two-sentence recap in MOM style",
-  "mom_entries": [
-    {
-      "id": "CR_002",
-      "title": "item title",
-      "status": "current status of the item",
-      "actions": "next actions, who, and ETA if mentioned",
-      "assignee": "responsible person/team if mentioned",
-      "eta": "expected completion period if mentioned"
-    }
-  ],
-  "key_points": ["short bullet"],
-  "participants": ["names if known"]
-}
-
-Do not include decisions, action_items, issues, questions, or duration arrays - use mom_entries only.`, glossary, stateJSON, input.FullTranscript, input.Title)
 }
 
 func (g *GeminiIntelligence) callLLM(ctx context.Context, prompt string) (string, error) {
@@ -326,6 +268,9 @@ func (g *GeminiIntelligence) parseAnalysisResponse(response string) (MeetingStat
 	var patch MeetingStatePatch
 
 	jsonStr := extractJSON(response)
+	if strings.TrimSpace(jsonStr) == "" {
+		return MeetingStatePatch{}, fmt.Errorf("LLM returned an empty JSON response")
+	}
 	if err := json.Unmarshal([]byte(jsonStr), &patch); err != nil {
 		return MeetingStatePatch{}, fmt.Errorf("failed to parse JSON: %w", err)
 	}
@@ -335,17 +280,6 @@ func (g *GeminiIntelligence) parseAnalysisResponse(response string) (MeetingStat
 	}
 
 	return patch, nil
-}
-
-func (g *GeminiIntelligence) parseFinalizationResponse(response string) (MeetingSummary, error) {
-	var summary MeetingSummary
-
-	jsonStr := extractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &summary); err != nil {
-		return MeetingSummary{}, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	return summary, nil
 }
 
 func (p *MeetingStatePatch) ensureIDs() error {

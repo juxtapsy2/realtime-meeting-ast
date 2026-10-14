@@ -21,6 +21,7 @@ type Meeting struct {
 	EndedAt    *time.Time              `json:"ended_at,omitempty"`
 	Transcript []types.TranscriptEvent `json:"transcript,omitempty"`
 	Summary    *types.MeetingSummary   `json:"summary,omitempty"`
+	Documents  []types.MeetingDocument `json:"documents,omitempty"`
 	CreatedAt  time.Time               `json:"created_at"`
 	UpdatedAt  time.Time               `json:"updated_at"`
 }

@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +22,10 @@ type OpenAIIntelligence struct {
 	baseURL  string
 	client   *http.Client
 	glossary Glossary
+	// budget gates requests against the provider's token limits. It is
+	// shared per API key (see budgetFor) because the limits belong to the
+	// credential, not to this instance.
+	budget *TokenBudget
 }
 
 // NewOpenAIIntelligence returns an IntelligenceProvider backed by the OpenAI
@@ -50,13 +57,14 @@ func newOpenAICompatible(apiKey, baseURL, defaultModel, model string, glossary G
 		baseURL:  baseURL,
 		client:   &http.Client{Timeout: 60 * time.Second},
 		glossary: glossary,
+		budget:   budgetFor(baseURL, apiKey),
 	}, nil
 }
 
 func (o *OpenAIIntelligence) AnalyzeChunk(ctx context.Context, input AnalysisInput) (MeetingStatePatch, error) {
 	prompt := o.buildAnalysisPrompt(input)
 
-	response, err := o.callLLM(ctx, prompt)
+	response, err := o.callLLM(ctx, prompt, nil)
 	if err != nil {
 		return MeetingStatePatch{}, fmt.Errorf("failed to call LLM: %w", err)
 	}
@@ -70,14 +78,14 @@ func (o *OpenAIIntelligence) AnalyzeChunk(ctx context.Context, input AnalysisInp
 }
 
 func (o *OpenAIIntelligence) FinalizeMeeting(ctx context.Context, input FinalizationInput) (MeetingSummary, error) {
-	prompt := o.buildFinalizationPrompt(input)
+	prompt := finalizationPrompt(o.glossary, input)
 
-	response, err := o.callLLM(ctx, prompt)
+	response, err := o.callLLM(ctx, prompt, momSummaryFormat())
 	if err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to call LLM: %w", err)
 	}
 
-	summary, err := o.parseFinalizationResponse(response)
+	summary, err := parseFinalizationJSON(response)
 	if err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -119,65 +127,15 @@ Format your response as JSON:
 }`, string(stateJSON), input.RecentContext, input.TranscriptChunk)
 }
 
-func (o *OpenAIIntelligence) buildFinalizationPrompt(input FinalizationInput) string {
-	stateJSON := "none"
-	if input.FinalState != nil {
-		if state, err := json.MarshalIndent(input.FinalState, "", "  "); err == nil {
-			stateJSON = string(state)
-		}
-	}
+// maxCompletionTokens bounds every generation. Without an explicit value the
+// provider's default can truncate a long MoM mid-JSON (schema validation then
+// fails with failed_generation) or push the model to compress the list of
+// items. 8192 leaves room for reasoning plus a full-length MoM.
+const maxCompletionTokens = 8192
 
-	glossary := o.glossary.PromptSection()
-
-	return fmt.Sprintf(`You are an AI meeting assistant. Generate a final meeting summary in Minutes of Meeting (MOM) style based on the complete transcript.
-
-%s
-Final Meeting State:
-%s
-
-Full Transcript:
-%s
-
-Write the summary in this exact MOM format. One entry per discussed item:
-
-28/09/2026 %s MOM:
-[ITEM_ID] Item title: current status of the item.
-
-  Actions: next action needed, ETA: expected completion period
-
-Rules:
-- The opening line must be "DD/MM/YYYY <meeting title> MOM:" using today's date.
-- Each entry begins with the exact business identifier in square brackets when one exists (e.g. [CR_002]). Never invent or change identifiers.
-- For every entry:
-  * state the CURRENT STATUS clearly (what has been confirmed/done/decided so far).
-  * then list the NEXT ACTIONS as a single "Actions:" line.
-  * include who is responsible when mentioned, and the ETA when mentioned.
-- Use the regulated business glossary terms EXACTLY as written. Never guess or substitute similar-sounding words for glossary terms.
-- Preserve the speakers' original language. If the meeting mixed Vietnamese and English, keep that mix in each entry.
-- Keep entries terse; no commentary outside the MOM format.
-
-Return JSON only:
-{
-  "title": "meeting title",
-  "summary": "one- or two-sentence recap in MOM style",
-  "mom_entries": [
-    {
-      "id": "CR_002",
-      "title": "item title",
-      "status": "current status of the item",
-      "actions": "next actions, who, and ETA if mentioned",
-      "assignee": "responsible person/team if mentioned",
-      "eta": "expected completion period if mentioned"
-    }
-  ],
-  "key_points": ["short bullet"],
-  "participants": ["names if known"]
-}
-
-Do not include decisions, action_items, issues, questions, or duration arrays - use mom_entries only.`, glossary, stateJSON, input.FullTranscript, input.Title)
-}
-
-func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string, error) {
+// callLLM performs one chat-completions request. responseFormat, when
+// non-nil, is sent as the response_format field (e.g. a strict JSON schema).
+func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string, responseFormat map[string]interface{}) (string, error) {
 	requestBody := map[string]interface{}{
 		"model": o.model,
 		"messages": []map[string]string{
@@ -190,7 +148,11 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 				"content": prompt,
 			},
 		},
-		"temperature": 0.3,
+		"temperature":           0.3,
+		"max_completion_tokens": maxCompletionTokens,
+	}
+	if responseFormat != nil {
+		requestBody["response_format"] = responseFormat
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
@@ -198,8 +160,17 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 		return "", err
 	}
 
+	// Gate on the provider's token budget before sending: wait for the
+	// minute window instead of provoking a 429. ErrDailyTokenBudget is
+	// terminal and must not be retried.
+	res, err := o.budget.Reserve(ctx, estimateTokens(jsonBody))
+	if err != nil {
+		return "", err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
+		o.budget.Release(res)
 		return "", err
 	}
 
@@ -208,13 +179,48 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 
 	resp, err := o.client.Do(req)
 	if err != nil {
+		o.budget.Release(res)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		o.budget.Release(res)
 		return "", err
+	}
+
+	var apiErr struct {
+		Error struct {
+			Message          string `json:"message"`
+			Type             string `json:"type"`
+			FailedGeneration string `json:"failed_generation"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &apiErr)
+
+	// Surface throttling as a typed error so retry loops can honor the
+	// provider-suggested wait instead of guessing (Groq TPM limits can
+	// require ~40s between large requests).
+	if resp.StatusCode == http.StatusTooManyRequests ||
+		strings.Contains(apiErr.Error.Type, "rate_limit") ||
+		strings.Contains(apiErr.Error.Message, "Rate limit") {
+		o.budget.Release(res)
+		msg := apiErr.Error.Message
+		if msg == "" {
+			msg = fmt.Sprintf("LLM API error (status %s)", resp.Status)
+		} else if apiErr.Error.Type != "" {
+			msg = fmt.Sprintf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
+		}
+		return "", &RateLimitError{
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), apiErr.Error.Message),
+			Message:    msg,
+		}
+	}
+
+	// Rejected requests are not billed, so give their reservation back.
+	if resp.StatusCode != http.StatusOK {
+		o.budget.Release(res)
 	}
 
 	var response struct {
@@ -223,10 +229,27 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
+		if resp.StatusCode == http.StatusOK {
+			// The provider billed us but the body is unreadable; keep the
+			// estimate so the window is not under-counted.
+			o.budget.Record(res, estimateTokens(jsonBody))
+		}
 		return "", err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		actual := response.Usage.PromptTokens + response.Usage.CompletionTokens
+		if actual <= 0 {
+			actual = estimateTokens(jsonBody)
+		}
+		o.budget.Record(res, actual)
 	}
 
 	if len(response.Choices) > 0 {
@@ -237,16 +260,31 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string) (string
 		return content, nil
 	}
 
-	var apiErr struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
-		return "", fmt.Errorf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
+	if apiErr.Error.Message != "" {
+		msg := fmt.Sprintf("LLM API error (%s): %s", apiErr.Error.Type, apiErr.Error.Message)
+		if gen := apiErr.Error.FailedGeneration; gen != "" {
+			msg += fmt.Sprintf(" (invalid output: %.300s)", gen)
+		}
+		return "", errors.New(msg)
 	}
 	return "", fmt.Errorf("no response from LLM (status %s)", resp.Status)
+}
+
+// retryAfterMessage matches Groq's "Please try again in 39.915s." hint.
+var retryAfterMessage = regexp.MustCompile(`try again in ([0-9]+(?:\.[0-9]+)?)s`)
+
+// parseRetryAfter extracts the suggested wait from the Retry-After header,
+// falling back to the provider's error message. Zero when neither applies.
+func parseRetryAfter(headerValue, message string) time.Duration {
+	if secs, err := strconv.ParseFloat(strings.TrimSpace(headerValue), 64); err == nil && secs > 0 {
+		return time.Duration(secs * float64(time.Second))
+	}
+	if m := retryAfterMessage.FindStringSubmatch(message); len(m) == 2 {
+		if secs, err := strconv.ParseFloat(m[1], 64); err == nil && secs > 0 {
+			return time.Duration(secs * float64(time.Second))
+		}
+	}
+	return 0
 }
 
 func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStatePatch, error) {
@@ -254,6 +292,9 @@ func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStat
 
 	// Try to extract JSON from the response
 	jsonStr := extractJSON(response)
+	if strings.TrimSpace(jsonStr) == "" {
+		return MeetingStatePatch{}, fmt.Errorf("LLM returned an empty JSON response")
+	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &patch); err != nil {
 		return MeetingStatePatch{}, fmt.Errorf("failed to parse JSON: %w", err)
@@ -289,19 +330,6 @@ func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStat
 	return patch, nil
 }
 
-func (o *OpenAIIntelligence) parseFinalizationResponse(response string) (MeetingSummary, error) {
-	var summary MeetingSummary
-
-	// Try to extract JSON from the response
-	jsonStr := extractJSON(response)
-
-	if err := json.Unmarshal([]byte(jsonStr), &summary); err != nil {
-		return MeetingSummary{}, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	return summary, nil
-}
-
 func extractJSON(response string) string {
 	// Try to extract JSON from markdown code block
 	startMarker := "```json\n"
@@ -310,7 +338,9 @@ func extractJSON(response string) string {
 	start := strings.Index(response, startMarker)
 	end := strings.LastIndex(response, endMarker)
 
-	if start >= 0 && end > start {
+	// end must cover the whole start marker or the slice below would be
+	// invalid; a malformed fence falls through to the raw response.
+	if start >= 0 && end >= start+len(startMarker) {
 		return response[start+len(startMarker) : end]
 	}
 

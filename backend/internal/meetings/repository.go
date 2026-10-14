@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/user/realtime-meeting-ast/backend/internal/types"
 )
 
 type Repository struct {
@@ -51,7 +53,7 @@ func (r *Repository) Create(meeting *Meeting) error {
 
 func (r *Repository) GetByID(id int) (*Meeting, error) {
 	query := `
-		SELECT id, title, owner_email, project_id, status, started_at, ended_at, transcript, summary, created_at, updated_at
+		SELECT id, title, owner_email, project_id, status, started_at, ended_at, transcript, summary, documents, created_at, updated_at
 		FROM meetings
 		WHERE id = $1`
 
@@ -59,6 +61,7 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 	var owner sql.NullString
 	var transcript []byte
 	var summary []byte
+	var documents []byte
 	err := r.db.QueryRow(query, id).Scan(
 		&meeting.ID,
 		&meeting.Title,
@@ -69,6 +72,7 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 		&meeting.EndedAt,
 		&transcript,
 		&summary,
+		&documents,
 		&meeting.CreatedAt,
 		&meeting.UpdatedAt,
 	)
@@ -81,6 +85,9 @@ func (r *Repository) GetByID(id int) (*Meeting, error) {
 	meeting.OwnerEmail = owner.String
 
 	if err := scanMeetingJSON(meeting, transcript, summary); err != nil {
+		return nil, err
+	}
+	if err := scanDocuments(meeting, documents); err != nil {
 		return nil, err
 	}
 
@@ -292,4 +299,91 @@ func (r *Repository) SaveSummary(meetingID int, summary []byte) error {
 		return fmt.Errorf("failed to save summary: %w", err)
 	}
 	return nil
+}
+
+// storedDocument mirrors types.MeetingDocument but keeps the extracted text,
+// which is persisted for summary generation and never leaves the server.
+type storedDocument struct {
+	Name       string    `json:"name"`
+	Mime       string    `json:"mime"`
+	Chars      int       `json:"chars"`
+	UploadedAt time.Time `json:"uploaded_at"`
+	Text       string    `json:"text"`
+}
+
+func (r *Repository) GetDocuments(meetingID int) ([]types.MeetingDocument, error) {
+	query := `SELECT documents FROM meetings WHERE id = $1`
+
+	var raw []byte
+	if err := r.db.QueryRow(query, meetingID).Scan(&raw); err != nil {
+		return nil, fmt.Errorf("failed to get documents: %w", err)
+	}
+	return decodeDocuments(raw)
+}
+
+func (r *Repository) GetStoredDocuments(meetingID int) ([]storedDocument, error) {
+	query := `SELECT documents FROM meetings WHERE id = $1`
+
+	var raw []byte
+	if err := r.db.QueryRow(query, meetingID).Scan(&raw); err != nil {
+		return nil, fmt.Errorf("failed to get documents: %w", err)
+	}
+	var stored []storedDocument
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			return nil, fmt.Errorf("failed to parse documents: %w", err)
+		}
+	}
+	return stored, nil
+}
+
+func (r *Repository) SaveDocuments(meetingID int, docs []storedDocument) error {
+	data, err := json.Marshal(docs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal documents: %w", err)
+	}
+
+	query := `
+		UPDATE meetings
+		SET documents = $2, updated_at = NOW()
+		WHERE id = $1`
+
+	_, err = r.db.Exec(query, meetingID, string(data))
+	if err != nil {
+		return fmt.Errorf("failed to save documents: %w", err)
+	}
+	return nil
+}
+
+func scanDocuments(meeting *Meeting, raw []byte) error {
+	docs, err := decodeDocuments(raw)
+	if err != nil {
+		return err
+	}
+	if len(docs) > 0 {
+		meeting.Documents = docs
+	}
+	return nil
+}
+
+func decodeDocuments(raw []byte) ([]types.MeetingDocument, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var stored []storedDocument
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return nil, fmt.Errorf("failed to parse documents: %w", err)
+	}
+
+	docs := make([]types.MeetingDocument, 0, len(stored))
+	for _, d := range stored {
+		docs = append(docs, types.MeetingDocument{
+			Name:       d.Name,
+			Mime:       d.Mime,
+			Chars:      d.Chars,
+			UploadedAt: d.UploadedAt,
+		})
+	}
+	return docs, nil
 }

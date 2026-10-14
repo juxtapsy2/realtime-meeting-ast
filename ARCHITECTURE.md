@@ -411,6 +411,22 @@ Recent Context    Knowledge Retrieval
 
 LLM analysis must not block transcription.
 
+Finalization (the MOM proposal) is evidence-driven: the provider receives the
+full transcript when present, and/or the extracted text of meeting documents
+uploaded after the fact (PDF, DOCX, PPTX, XLSX, CSV, TXT, MD). A meeting that was
+never recorded can still produce a MOM from its documents alone. Only the
+extracted text is persisted for later generation; original files are discarded
+at upload time and the text is never returned by the API.
+
+LLM requests pass a proactive token-budget gate before they are sent: a shared
+per-API-key budget admits a request only when the estimated cost (prompt bytes/4
+plus completion headroom) fits the provider's per-minute and per-day token
+limits (Groq free tier: 8K/min, 200K/day), waiting for the rolling minute window
+otherwise. The estimate is corrected with the provider's reported usage after
+each call. Daily exhaustion is terminal (no retry); if finalization ultimately
+fails, the server broadcasts `meeting.summary.failed` with a user-facing reason
+so the client stops waiting and offers a retry.
+
 ---
 
 # 13. Meeting State
@@ -798,6 +814,7 @@ Intelligence failure:
 
 ```text
 transcript remains safe
+connected clients receive meeting.summary.failed with a reason
 ```
 
 STT failure:

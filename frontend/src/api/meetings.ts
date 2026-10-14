@@ -1,6 +1,11 @@
-import { Meeting, TranscriptEvent } from '../types';
+import { Meeting, MeetingDocument, TranscriptEvent } from '../types';
 
 const API_BASE = '/api';
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  const body = await response.text().catch(() => '');
+  return body.trim() || fallback;
+}
 
 export interface PaginatedMeetings {
   meetings: Meeting[];
@@ -45,7 +50,32 @@ export async function regenerateSummary(meetingId: number): Promise<void> {
     method: 'POST',
   });
   if (!response.ok) {
-    throw new Error('Failed to start summary generation');
+    throw new Error(await readError(response, 'Failed to start summary generation'));
+  }
+}
+
+export async function uploadMeetingDocuments(meetingId: number, files: File[]): Promise<MeetingDocument[]> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append('file', file);
+  }
+  const response = await fetch(`${API_BASE}/meetings/${meetingId}/documents`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response, 'Failed to upload documents'));
+  }
+  const data = await response.json();
+  return data.documents || [];
+}
+
+export async function clearMeetingDocuments(meetingId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/meetings/${meetingId}/documents`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response, 'Failed to clear documents'));
   }
 }
 

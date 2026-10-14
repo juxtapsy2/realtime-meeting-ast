@@ -3,6 +3,7 @@ package meetings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -283,7 +284,7 @@ func (s *Service) ResumeMeeting(id int) error {
 // timeouts, empty responses), so a couple of retries usually recover the
 // summary without blocking transcription.
 func (s *Service) generateSummaryWithRetry(ctx context.Context, p intelligence.IntelligenceProvider, meetingID int, input intelligence.FinalizationInput) (intelligence.MeetingSummary, error) {
-	const maxAttempts = 3
+	const maxAttempts = 4
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -292,17 +293,64 @@ func (s *Service) generateSummaryWithRetry(ctx context.Context, p intelligence.I
 			return summary, nil
 		}
 		lastErr = err
+		if errors.Is(err, intelligence.ErrDailyTokenBudget) {
+			// Terminal: retrying cannot help until the provider's daily
+			// window resets, so fail fast instead of burning the backoff.
+			log.Printf("Meeting %d: daily AI token budget exhausted, not retrying", meetingID)
+			break
+		}
 		if attempt == maxAttempts {
 			break
 		}
-		log.Printf("Meeting %d: summary attempt %d/%d failed: %v; retrying", meetingID, attempt, maxAttempts, err)
+		delay := summaryRetryDelay(attempt, err)
+		log.Printf("Meeting %d: summary attempt %d/%d failed: %v; retrying in %s", meetingID, attempt, maxAttempts, err, delay)
 		select {
-		case <-time.After(time.Duration(attempt) * time.Second):
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return intelligence.MeetingSummary{}, ctx.Err()
 		}
 	}
 	return intelligence.MeetingSummary{}, lastErr
+}
+
+// summaryRetryDelay is the wait before the next summary attempt: exponential
+// backoff (5s, 10s, 20s), extended to the provider-suggested wait when the
+// failure was a rate limit. Groq's free tier fits roughly one large summary
+// prompt per minute, so honoring the suggested wait is what makes the retry
+// succeed instead of burning the remaining attempts.
+func summaryRetryDelay(attempt int, err error) time.Duration {
+	delay := time.Duration(5<<uint(attempt-1)) * time.Second
+
+	var rateLimited *intelligence.RateLimitError
+	if errors.As(err, &rateLimited) && rateLimited.RetryAfter > delay {
+		delay = rateLimited.RetryAfter
+	}
+
+	if delay > 60*time.Second {
+		delay = 60 * time.Second
+	}
+	return delay
+}
+
+// summaryFailureMessage converts a final summary failure into a
+// user-facing message that says whether waiting will help. It must not leak
+// raw provider payloads.
+func summaryFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, intelligence.ErrDailyTokenBudget):
+		return "The AI daily limit (200K tokens) is used up. Summary generation will work again tomorrow; you can retry later."
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled):
+		return "Summary generation timed out. Please retry."
+	}
+
+	var rateLimited *intelligence.RateLimitError
+	if errors.As(err, &rateLimited) {
+		if secs := int(rateLimited.RetryAfter.Seconds() + 0.999); secs > 0 {
+			return fmt.Sprintf("AI rate limit reached (8K tokens/minute). Try again in about %d seconds.", secs)
+		}
+		return "AI rate limit reached (8K tokens/minute). Wait about a minute, then retry."
+	}
+	return "Summary generation failed. Please retry."
 }
 
 // finalizeMeetingAsync generates and persists the meeting summary in the
@@ -331,7 +379,14 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 				parts = append(parts, strings.TrimSpace(seg.Text))
 			}
 		}
-		if len(parts) == 0 {
+
+		stored, err := s.repo.GetStoredDocuments(meetingID)
+		if err != nil {
+			log.Printf("Meeting %d: failed to load documents for summary: %v", meetingID, err)
+		}
+		transcriptText := strings.Join(parts, " ")
+		docText := documentsText(stored)
+		if transcriptText == "" && docText == "" {
 			return
 		}
 
@@ -342,7 +397,8 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 
 		input := intelligence.FinalizationInput{
 			MeetingID:      strconv.Itoa(meetingID),
-			FullTranscript: strings.Join(parts, " "),
+			FullTranscript: transcriptText,
+			DocumentText:   docText,
 			FinalState:     &intelligence.MeetingState{},
 			Glossary:       s.glossary,
 		}
@@ -353,6 +409,11 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 		summary, err := s.generateSummaryWithRetry(ctx, p, meetingID, input)
 		if err != nil {
 			log.Printf("Meeting %d: failed to finalize summary: %v", meetingID, err)
+			// Tell connected clients why the summary is missing so the UI
+			// can stop waiting and show the reason instead of a spinner.
+			s.broadcaster.BroadcastToMeeting(meetingID, "meeting.summary.failed", map[string]string{
+				"message": summaryFailureMessage(err),
+			})
 			return
 		}
 
@@ -447,13 +508,13 @@ func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	segments, err := s.repo.GetTranscript(id)
+	segments, err := s.GetTranscriptSegments(id)
 	if err != nil {
 		http.Error(w, "Failed to load transcript", http.StatusInternalServerError)
 		return
 	}
-	if len(segments) == 0 {
-		http.Error(w, "Meeting has no transcript to summarize", http.StatusBadRequest)
+	if len(segments) == 0 && len(meeting.Documents) == 0 {
+		http.Error(w, "Meeting has no transcript or documents to summarize", http.StatusBadRequest)
 		return
 	}
 

@@ -2,7 +2,24 @@ package intelligence
 
 import (
 	"context"
+	"fmt"
+	"time"
 )
+
+// RateLimitError reports that the provider throttled the request.
+// RetryAfter is the wait the provider suggested, zero when it did not say.
+// Retry loops should wait at least this long before the next attempt.
+type RateLimitError struct {
+	RetryAfter time.Duration
+	Message    string
+}
+
+func (e *RateLimitError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("LLM rate limited (retry after %s)", e.RetryAfter)
+}
 
 // IntelligenceProvider is the interface for AI analysis providers
 type IntelligenceProvider interface {
@@ -88,11 +105,15 @@ type OpenQuestion struct {
 
 // FinalizationInput contains data for meeting finalization
 type FinalizationInput struct {
-	MeetingID      string        `json:"meeting_id"`
-	FullTranscript string        `json:"full_transcript"`
-	FinalState     *MeetingState `json:"final_state"`
-	Title          string        `json:"title,omitempty"`
-	Glossary       Glossary      `json:"-"`
+	MeetingID      string `json:"meeting_id"`
+	FullTranscript string `json:"full_transcript"`
+	// DocumentText holds the extracted text of meeting materials uploaded
+	// after the fact (agenda, notes, report). It substitutes for or
+	// supplements the transcript when a meeting was never recorded.
+	DocumentText string        `json:"-"`
+	FinalState   *MeetingState `json:"final_state"`
+	Title        string        `json:"title,omitempty"`
+	Glossary     Glossary      `json:"-"`
 }
 
 // MOMEntry is one item in the "current status → next actions" minutes-of-meeting

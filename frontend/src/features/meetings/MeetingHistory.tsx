@@ -1,8 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Meeting, TranscriptEvent, MeetingSummary } from '../../types';
-import { fetchTranscript, fetchMeeting, regenerateSummary } from '../../api/meetings';
+import { Meeting, TranscriptEvent, MeetingSummary, MeetingDocument } from '../../types';
+import {
+  fetchTranscript,
+  fetchMeeting,
+  regenerateSummary,
+  uploadMeetingDocuments,
+  clearMeetingDocuments,
+} from '../../api/meetings';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
+import { DocumentsPanel } from './DocumentsPanel';
 
 interface MeetingHistoryProps {
   meeting: Meeting;
@@ -12,7 +19,9 @@ interface MeetingHistoryProps {
 export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const [transcript, setTranscript] = useState<TranscriptEvent[]>([]);
   const [summary, setSummary] = useState<MeetingSummary | null>(meeting.summary || null);
+  const [documents, setDocuments] = useState<MeetingDocument[]>(meeting.documents || []);
   const [regenerating, setRegenerating] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,8 +54,11 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     let cancelled = false;
     fetchMeeting(meeting.id)
       .then((fresh) => {
-        if (!cancelled && fresh.summary) {
-          setSummary(fresh.summary);
+        if (!cancelled) {
+          if (fresh.summary) {
+            setSummary(fresh.summary);
+          }
+          setDocuments(fresh.documents || []);
         }
       })
       .catch((err) => console.error('Failed to load meeting', err));
@@ -61,7 +73,21 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const handleMeetingSummary = useCallback((data: MeetingSummary) => {
     setSummary(data);
     setRegenerating(false);
+    setToast(null);
   }, []);
+
+  // Generation failed server-side: stop the pending state and tell the user
+  // why, instead of leaving them waiting on a spinner that will never resolve.
+  const handleSummaryFailed = useCallback((data: { message?: string }) => {
+    setRegenerating(false);
+    setToast(data?.message || 'Summary generation failed. Please retry.');
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
@@ -75,9 +101,23 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     }
   }, [meeting.id]);
 
+  const handleUploadDocuments = useCallback(
+    async (files: File[]) => {
+      const docs = await uploadMeetingDocuments(meeting.id, files);
+      setDocuments(docs);
+    },
+    [meeting.id],
+  );
+
+  const handleClearDocuments = useCallback(async () => {
+    await clearMeetingDocuments(meeting.id);
+    setDocuments([]);
+  }, [meeting.id]);
+
   useWebSocket({
     meetingId: meeting.id,
     onMeetingSummary: handleMeetingSummary,
+    onMeetingSummaryFailed: handleSummaryFailed,
   });
 
   return (
@@ -123,8 +163,11 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
           )}
 
           {!isLoading && !error && transcript.length === 0 && (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex flex-col items-center justify-center gap-1">
               <p className="text-gray-500">No transcript recorded for this meeting.</p>
+              <p className="text-xs text-gray-400">
+                Upload meeting documents on the right to generate the summary from files instead.
+              </p>
             </div>
           )}
 
@@ -142,17 +185,36 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
           <div className="px-4 py-3 border-b border-gray-200">
             <h2 className="text-lg font-medium text-gray-900">Meeting Summary</h2>
           </div>
+          <div className="max-h-64 overflow-y-auto border-b border-gray-200">
+            <DocumentsPanel
+              documents={documents}
+              onUpload={handleUploadDocuments}
+              onClear={handleClearDocuments}
+            />
+          </div>
           <div className="flex-1 overflow-y-auto p-4">
             {summary ? (
               <SummaryPanel summary={summary} meeting={meeting} />
             ) : regenerating ? (
               <SummaryPending />
             ) : (
-              <SummaryMissing onGenerate={handleRegenerate} />
+              <SummaryMissing
+                onGenerate={handleRegenerate}
+                canGenerate={transcript.length > 0 || documents.length > 0}
+              />
             )}
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div
+          role="alert"
+          className="fixed top-4 right-4 z-50 max-w-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm rounded-lg shadow-lg px-4 py-3"
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -170,11 +232,15 @@ function SummaryPanel({ summary, meeting }: { summary: MeetingSummary; meeting: 
               {momDate} {summary.title || meeting.title} MOM:
             </p>
             <div className="space-y-2 text-sm">
-              {summary.mom_entries.map((entry) => (
-                <div key={entry.id}>
+              {summary.mom_entries.map((entry, idx) => (
+                <div key={entry.id || `entry-${idx}`}>
                   <p className="text-gray-900">
                     <span className="text-blue-500">•</span>{' '}
-                    <span className="font-semibold">{entry.title}:</span> {entry.status}.
+                    <span className="font-semibold">
+                      {entry.id ? `[${entry.id}] ` : ''}
+                      {entry.title}:
+                    </span>{' '}
+                    {entry.status}.
                   </p>
                   {(entry.actions || entry.eta || entry.assignee) && (
                     <p className="pl-4 mt-0.5 text-gray-600">
@@ -291,16 +357,19 @@ function SummaryPending() {
   );
 }
 
-function SummaryMissing({ onGenerate }: { onGenerate: () => void }) {
+function SummaryMissing({ onGenerate, canGenerate }: { onGenerate: () => void; canGenerate: boolean }) {
   return (
     <div className="py-8 text-center">
       <p className="text-gray-600 text-sm">No summary was generated for this meeting.</p>
       <p className="text-gray-400 text-xs mt-1">
-        The transcript was preserved; you can generate the summary now.
+        {canGenerate
+          ? 'The transcript or uploaded documents are preserved; you can generate the summary now.'
+          : 'Upload meeting documents or use a transcript to have evidence to summarize.'}
       </p>
       <button
         onClick={onGenerate}
-        className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        disabled={!canGenerate}
+        className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Generate Summary
       </button>

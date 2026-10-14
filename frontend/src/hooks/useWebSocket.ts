@@ -11,6 +11,7 @@ interface UseWebSocketOptions {
   onMeetingResumed?: (data: any) => void;
   onStateUpdate?: (state: Partial<MeetingState>) => void;
   onMeetingSummary?: (data: any) => void;
+  onMeetingSummaryFailed?: (data: { message?: string }) => void;
   onError?: (error: Event) => void;
 }
 
@@ -24,6 +25,7 @@ export function useWebSocket({
   onMeetingResumed,
   onStateUpdate,
   onMeetingSummary,
+  onMeetingSummaryFailed,
   onError,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -40,6 +42,7 @@ export function useWebSocket({
     onMeetingResumed,
     onStateUpdate,
     onMeetingSummary,
+    onMeetingSummaryFailed,
     onError,
   });
   callbacksRef.current = {
@@ -51,6 +54,7 @@ export function useWebSocket({
     onMeetingResumed,
     onStateUpdate,
     onMeetingSummary,
+    onMeetingSummaryFailed,
     onError,
   };
 
@@ -106,6 +110,9 @@ export function useWebSocket({
             break;
           case 'meeting.summary':
             cbs.onMeetingSummary?.(data.data);
+            break;
+          case 'meeting.summary.failed':
+            cbs.onMeetingSummaryFailed?.(data.data);
             break;
           default:
             console.log('Unknown event type:', data.type);
