@@ -147,8 +147,12 @@ func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc Meet
 	for {
 		messageType, message, err := c.Conn.WS.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+			// Clean closes (client navigated away) stay quiet; everything
+			// else — read-deadline expiry (client went silent for 60s),
+			// resets, abnormal codes — is logged, because those are the
+			// signatures of an interrupted recording session.
+			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.Printf("Meeting %d: WebSocket read error: %v", c.MeetingID, err)
 			}
 			break
 		}

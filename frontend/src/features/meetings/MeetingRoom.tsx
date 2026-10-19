@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Meeting, TranscriptEvent, MeetingState } from '../../types';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { AudioSource, useMicrophone } from '../../hooks/useMicrophone';
+import { fetchMeeting, fetchTranscript } from '../../api/meetings';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
 import { IntelligencePanel } from '../intelligence/IntelligencePanel';
 
@@ -33,7 +34,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   }, []);
 
   const handleTranscriptFinal = useCallback((event: TranscriptEvent) => {
-    setTranscript((prev) => [...prev, event]);
+    setTranscript((prev) =>
+      prev.some((s) => s.segment_id === event.segment_id) ? prev : [...prev, event],
+    );
     setPartialText('');
   }, []);
 
@@ -61,7 +64,61 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     }));
   }, []);
 
-  const { isConnected, sendAudio, sendCommand } = useWebSocket({
+  // Merges the server-persisted transcript with what this session already
+  // rendered. Finals are stable evidence with stable IDs, so a segment_id
+  // set-union never duplicates and never drops live events received while
+  // the fetch was in flight.
+  const mergeTranscript = useCallback((persisted: TranscriptEvent[]) => {
+    setTranscript((live) => {
+      const merged = [...persisted];
+      const seen = new Set(persisted.map((s) => s.segment_id));
+      for (const event of live) {
+        if (!seen.has(event.segment_id)) {
+          seen.add(event.segment_id);
+          merged.push(event);
+        }
+      }
+      merged.sort((a, b) => a.start_time - b.start_time);
+      return merged;
+    });
+  }, []);
+
+  const backfillTranscript = useCallback(async () => {
+    try {
+      const persisted = await fetchTranscript(meeting.id);
+      mergeTranscript(persisted);
+    } catch (err) {
+      // The backfill is best-effort: live events still flow either way.
+      console.error('Failed to backfill transcript:', err);
+    }
+  }, [meeting.id, mergeTranscript]);
+
+  // Initial load: entering an in-progress meeting must show what was
+  // already said, not an empty panel.
+  useEffect(() => {
+    backfillTranscript();
+  }, [backfillTranscript]);
+
+  const handleReconnected = useCallback(() => {
+    // Refetch finals missed while the socket was down.
+    backfillTranscript();
+    // The meeting may have been ended/paused remotely during the gap, in
+    // which case meeting.ended/paused was never received — resync status.
+    fetchMeeting(meeting.id)
+      .then((fresh) => {
+        if (fresh.status === 'completed') {
+          handleMeetingEnded();
+        } else if (fresh.status === 'paused') {
+          setIsPaused(true);
+        } else if (fresh.status === 'active') {
+          setIsMeetingActive(true);
+          setIsPaused(false);
+        }
+      })
+      .catch((err) => console.error('Failed to resync meeting status:', err));
+  }, [backfillTranscript, meeting.id, handleMeetingEnded]);
+
+  const { isConnected, isReconnecting, sendAudio, sendCommand } = useWebSocket({
     meetingId: meeting.id,
     onTranscriptPartial: handleTranscriptPartial,
     onTranscriptFinal: handleTranscriptFinal,
@@ -70,6 +127,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     onMeetingPaused: () => setIsPaused(true),
     onMeetingResumed: () => setIsPaused(false),
     onStateUpdate: handleStateUpdate,
+    onReconnected: handleReconnected,
   });
 
   const handleAudioData = useCallback((data: ArrayBuffer) => {
@@ -173,21 +231,24 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
                 {!isPaused ? (
                   <button
                     onClick={handlePauseMeeting}
-                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+                    disabled={!isConnected}
+                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Pause
                   </button>
                 ) : (
                   <button
                     onClick={handleResumeMeeting}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                    disabled={!isConnected}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Resume
                   </button>
                 )}
                 <button
                   onClick={handleEndMeeting}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  disabled={!isConnected}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   End Meeting
                 </button>
@@ -220,6 +281,16 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
           </div>
         </div>
       </header>
+
+      {/* Recording interruption warning: without this a network blip looks
+          like a healthy recording while audio is silently dropped.
+          isReconnecting only turns true after a real drop, so the banner
+          does not flash during the initial connection. */}
+      {isMeetingActive && isReconnecting && (
+        <div role="alert" className="bg-red-50 border-b border-red-200 px-6 py-2 text-sm text-red-700">
+          Connection lost — reconnecting… Audio is not being recorded right now.
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">

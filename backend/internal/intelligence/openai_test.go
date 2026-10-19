@@ -268,3 +268,96 @@ func TestCallLLMReleasesBudgetOnRateLimit(t *testing.T) {
 		t.Errorf("budget window = %d after rejected request, want 0 (rejected requests are not billed)", got)
 	}
 }
+
+func TestParseRequestTooLargeError(t *testing.T) {
+	msg := "Request too large for model `openai/gpt-oss-120b` in organization `org` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 9807, please reduce your message size and try again."
+	e := parseRequestTooLargeError(msg)
+	if e.Limit != 8000 || e.Requested != 9807 {
+		t.Errorf("parsed limit/requested = %d/%d, want 8000/9807", e.Limit, e.Requested)
+	}
+	if e.Message != msg {
+		t.Errorf("message not preserved")
+	}
+	// Unknown shape still yields a usable typed error.
+	e2 := parseRequestTooLargeError("Request too large")
+	if e2.Limit != 0 || e2.Requested != 0 {
+		t.Errorf("unexpected parse of bare message: %+v", e2)
+	}
+}
+
+func TestCallLLMSurfacesRequestTooLarge(t *testing.T) {
+	groqBody := `{"error":{"message":"Request too large for model ` + "`openai/gpt-oss-120b`" + ` in organization ` + "`org`" + ` service tier ` + "`on_demand`" + ` on tokens per minute (TPM): Limit 8000, Requested 9807, please reduce your message size and try again.","type":"tokens"}}`
+	srv, _ := stubServer(t, http.StatusBadRequest, nil, groqBody)
+	p, _ := newOpenAICompatible("key", srv.URL, "m", "", Glossary{})
+
+	_, err := p.callLLM(t.Context(), "big prompt", nil)
+	var tooLarge *RequestTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("want RequestTooLargeError, got %v", err)
+	}
+	if tooLarge.Limit != 8000 || tooLarge.Requested != 9807 {
+		t.Errorf("parsed %d/%d, want 8000/9807", tooLarge.Limit, tooLarge.Requested)
+	}
+	if got := p.budget.windowTotalLocked(); got != 0 {
+		t.Errorf("budget window = %d after rejected request, want 0", got)
+	}
+}
+
+func TestFinalizeMeetingSplitsWhenRequestTooLarge(t *testing.T) {
+	summaryBody := `{"choices":[{"message":{"content":"{\"title\":\"Weekly sync\",\"summary\":\"All items covered after merge.\",\"mom_entries\":[{\"id\":\"CR_001\",\"title\":\"first\",\"status\":\"done\",\"actions\":\"\",\"assignee\":\"\",\"eta\":\"\"},{\"id\":\"CR_002\",\"title\":\"second\",\"status\":\"pending\",\"actions\":\"\",\"assignee\":\"\",\"eta\":\"\"}],\"key_points\":[\"two items\"]}"}}]}`
+	chunkBody := `{"choices":[{"message":{"content":"{\"mom_entries\":[{\"id\":\"CR_001\",\"title\":\"first\",\"status\":\"done\",\"actions\":\"\",\"assignee\":\"\",\"eta\":\"\"}],\"key_points\":[\"first item\"]}"}}]}`
+
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+			ResponseFormat struct {
+				JSONSchema struct {
+					Name string `json:"name"`
+				} `json:"json_schema"`
+			} `json:"response_format"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		calls = append(calls, req.ResponseFormat.JSONSchema.Name)
+
+		switch req.ResponseFormat.JSONSchema.Name {
+		case "mom_summary":
+			if strings.Contains(req.Messages[1].Content, "Pre-extracted MOM entries") {
+				io.WriteString(w, summaryBody)
+				return
+			}
+			// The single-shot call: reject it as oversized.
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error":{"message":"Request too large for model `+"`m`"+` on tokens per minute (TPM): Limit 8000, Requested 9807, please reduce your message size and try again.","type":"tokens"}}`)
+		case "mom_chunk_entries":
+			io.WriteString(w, chunkBody)
+		default:
+			t.Errorf("unexpected schema %q", req.ResponseFormat.JSONSchema.Name)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	p, _ := newOpenAICompatible("key", srv.URL, "m", "", Glossary{})
+	summary, err := p.FinalizeMeeting(t.Context(), FinalizationInput{
+		MeetingID:      "1",
+		Title:          "Weekly sync",
+		FullTranscript: "CR_001 done. CR_002 pending.",
+	})
+	if err != nil {
+		t.Fatalf("FinalizeMeeting: %v", err)
+	}
+	if summary.Title != "Weekly sync" || len(summary.MOMEntries) != 2 {
+		t.Errorf("unexpected merged summary: %+v", summary)
+	}
+	if len(calls) < 3 || calls[0] != "mom_summary" || calls[1] != "mom_chunk_entries" {
+		t.Errorf("call sequence = %v, want mom_summary then mom_chunk_entries...", calls)
+	}
+	last := calls[len(calls)-1]
+	if last != "mom_summary" {
+		t.Errorf("last call schema = %q, want mom_summary (merge)", last)
+	}
+}

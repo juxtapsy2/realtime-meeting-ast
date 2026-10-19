@@ -157,7 +157,7 @@ func TestBudgetForSharesPerCredential(t *testing.T) {
 }
 
 func TestEstimateTokens(t *testing.T) {
-	if got := estimateTokens(make([]byte, 4000)); got != 4000/4+completionReserve {
-		t.Errorf("estimateTokens(4000 bytes) = %d, want %d", got, 4000/4+completionReserve)
+	if got := estimateTokens(make([]byte, 4000)); got != 4000*estimateNumerator/estimateDenominator+completionReserve {
+		t.Errorf("estimateTokens(4000 bytes) = %d, want %d", got, 4000*estimateNumerator/estimateDenominator+completionReserve)
 	}
 }

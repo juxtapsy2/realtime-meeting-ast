@@ -21,6 +21,23 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("LLM rate limited (retry after %s)", e.RetryAfter)
 }
 
+// RequestTooLargeError reports a prompt that exceeds the provider's hard
+// per-request token cap (e.g. Groq free tier: one request may not exceed the
+// 8000 TPM limit even in an empty window). Waiting cannot help; the caller
+// must shrink the input or split it.
+type RequestTooLargeError struct {
+	Requested int
+	Limit     int
+	Message   string
+}
+
+func (e *RequestTooLargeError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("LLM request too large (requested %d tokens, limit %d)", e.Requested, e.Limit)
+}
+
 // IntelligenceProvider is the interface for AI analysis providers
 type IntelligenceProvider interface {
 	// AnalyzeChunk analyzes a chunk of transcript and returns meeting state updates

@@ -299,6 +299,14 @@ func (s *Service) generateSummaryWithRetry(ctx context.Context, p intelligence.I
 			log.Printf("Meeting %d: daily AI token budget exhausted, not retrying", meetingID)
 			break
 		}
+		var tooLarge *intelligence.RequestTooLargeError
+		if errors.As(err, &tooLarge) {
+			// The provider already rejected the request for exceeding its
+			// per-request cap and the provider-side chunked fallback also
+			// failed; retrying the identical input cannot shrink it.
+			log.Printf("Meeting %d: LLM request too large even after chunking, not retrying: %v", meetingID, err)
+			break
+		}
 		if attempt == maxAttempts {
 			break
 		}
@@ -343,6 +351,11 @@ func summaryFailureMessage(err error) string {
 		return "Summary generation timed out. Please retry."
 	}
 
+	var tooLarge *intelligence.RequestTooLargeError
+	if errors.As(err, &tooLarge) {
+		return "The document is too large for the AI model even after automatic splitting. Please split the file into smaller parts and upload it again."
+	}
+
 	var rateLimited *intelligence.RateLimitError
 	if errors.As(err, &rateLimited) {
 		if secs := int(rateLimited.RetryAfter.Seconds() + 0.999); secs > 0 {
@@ -364,7 +377,10 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+		// The chunked finalization fallback (map-reduce) issues several LLM
+		// calls, each possibly waiting on the 8K/minute token window, so
+		// this timeout is much larger than a single call's.
+		ctx, cancel := context.WithTimeout(context.Background(), 420*time.Second)
 		defer cancel()
 
 		segments, err := s.GetTranscriptSegments(meetingID)

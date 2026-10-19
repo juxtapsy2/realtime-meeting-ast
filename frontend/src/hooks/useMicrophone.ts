@@ -16,11 +16,26 @@ export function useMicrophone({
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const visibilityHandlerRef = useRef<(() => void) | null>(null);
   const [isActive, setIsActive] = useState(false);
   const [source, setSource] = useState<AudioSource | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current !== null) {
+      clearInterval(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    if (visibilityHandlerRef.current !== null) {
+      document.removeEventListener('visibilitychange', visibilityHandlerRef.current);
+      visibilityHandlerRef.current = null;
+    }
+  }, []);
+
   const stopInternal = useCallback(() => {
+    clearWatchdog();
+
     // Stop processor
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -38,7 +53,7 @@ export function useMicrophone({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-  }, []);
+  }, [clearWatchdog]);
 
   const start = useCallback(
     async (nextSource: AudioSource) => {
@@ -112,6 +127,45 @@ export function useMicrophone({
         processor.connect(silentGain);
         silentGain.connect(audioContext.destination);
 
+        // Track OS/browser-level capture failures. ScriptProcessor keeps
+        // firing even when the context is suspended or a device is
+        // unplugged, so without this the UI shows an active mic while
+        // no audio reaches onAudioData (the meeting-20 failure mode).
+        clearWatchdog();
+        watchdogRef.current = setInterval(() => {
+          const ctx = audioContextRef.current;
+          const current = streamRef.current;
+          if (!ctx || !current) return;
+
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch((err) => {
+              console.error('Failed to resume AudioContext:', err);
+            });
+          }
+
+          const liveTrack = current.getAudioTracks().some((track) => track.readyState === 'live');
+          if (!liveTrack || ctx.state === 'closed') {
+            console.error('Audio capture stopped unexpectedly');
+            stopInternal();
+            setIsActive(false);
+            setSource(null);
+            setError('Audio capture stopped unexpectedly. Please restart the microphone.');
+          }
+        }, 2000);
+
+        // Background tabs throttle timers AND suspend AudioContexts, so
+        // resume eagerly when the tab becomes visible again instead of
+        // waiting for the (also-throttled) watchdog.
+        const handleVisibility = () => {
+          if (document.visibilityState === 'visible' && audioContextRef.current?.state === 'suspended') {
+            audioContextRef.current.resume().catch((err) => {
+              console.error('Failed to resume AudioContext:', err);
+            });
+          }
+        };
+        visibilityHandlerRef.current = handleVisibility;
+        document.addEventListener('visibilitychange', handleVisibility);
+
         setIsActive(true);
         setSource(nextSource);
         setError(null);
@@ -123,7 +177,7 @@ export function useMicrophone({
         return false;
       }
     },
-    [sampleRate, channelCount, onAudioData, stopInternal]
+    [sampleRate, channelCount, onAudioData, stopInternal, clearWatchdog]
   );
 
   const stop = useCallback(() => {

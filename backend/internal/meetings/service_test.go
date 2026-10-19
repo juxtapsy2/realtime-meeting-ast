@@ -66,6 +66,20 @@ func TestGenerateSummaryWithRetryStopsOnDailyBudget(t *testing.T) {
 	}
 }
 
+func TestGenerateSummaryWithRetryStopsOnRequestTooLarge(t *testing.T) {
+	p := &stubProvider{err: &intelligence.RequestTooLargeError{Limit: 8000, Requested: 9807}}
+	s := &Service{}
+
+	_, err := s.generateSummaryWithRetry(context.Background(), p, 1, intelligence.FinalizationInput{})
+	var tooLarge *intelligence.RequestTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("generateSummaryWithRetry() error = %v, want RequestTooLargeError", err)
+	}
+	if p.calls != 1 {
+		t.Errorf("provider called %d times, want 1 (oversized input cannot shrink on retry)", p.calls)
+	}
+}
+
 func TestSummaryFailureMessage(t *testing.T) {
 	rateLimited := &intelligence.RateLimitError{RetryAfter: 46 * time.Second, Message: "rate limited"}
 
@@ -78,6 +92,7 @@ func TestSummaryFailureMessage(t *testing.T) {
 		{"rate limit with hint", rateLimited, "about 46 seconds"},
 		{"rate limit without hint", &intelligence.RateLimitError{Message: "rate limited"}, "about a minute"},
 		{"timeout", context.DeadlineExceeded, "timed out"},
+		{"request too large", &intelligence.RequestTooLargeError{Limit: 8000, Requested: 9807}, "too large"},
 		{"unknown failure", errors.New("boom"), "Summary generation failed"},
 	}
 	for _, tt := range tests {

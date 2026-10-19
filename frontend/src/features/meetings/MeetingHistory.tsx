@@ -114,10 +114,24 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     setDocuments([]);
   }, [meeting.id]);
 
+  // A summary (or regeneration) may have completed while the socket was
+  // down; the WS event is gone, so resync from REST on reconnect.
+  const handleReconnected = useCallback(() => {
+    fetchMeeting(meeting.id)
+      .then((fresh) => {
+        if (fresh.summary) {
+          setSummary(fresh.summary);
+        }
+        setDocuments(fresh.documents || []);
+      })
+      .catch((err) => console.error('Failed to resync meeting', err));
+  }, [meeting.id]);
+
   useWebSocket({
     meetingId: meeting.id,
     onMeetingSummary: handleMeetingSummary,
     onMeetingSummaryFailed: handleSummaryFailed,
+    onReconnected: handleReconnected,
   });
 
   return (

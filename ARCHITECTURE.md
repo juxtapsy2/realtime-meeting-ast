@@ -419,13 +419,29 @@ extracted text is persisted for later generation; original files are discarded
 at upload time and the text is never returned by the API.
 
 LLM requests pass a proactive token-budget gate before they are sent: a shared
-per-API-key budget admits a request only when the estimated cost (prompt bytes/4
+per-API-key budget admits a request only when the estimated cost (prompt
+bytes/2.6, conservative for dense Vietnamese/English identifier-heavy text,
 plus completion headroom) fits the provider's per-minute and per-day token
-limits (Groq free tier: 8K/min, 200K/day), waiting for the rolling minute window
-otherwise. The estimate is corrected with the provider's reported usage after
-each call. Daily exhaustion is terminal (no retry); if finalization ultimately
-fails, the server broadcasts `meeting.summary.failed` with a user-facing reason
-so the client stops waiting and offers a retry.
+limits (Groq free tier: 8K/min, 200K/day), waiting for the rolling minute
+window otherwise. The estimate is corrected with the provider's reported usage
+after each call. Daily exhaustion is terminal (no retry); if finalization
+ultimately fails, the server broadcasts `meeting.summary.failed` with a
+user-facing reason so the client stops waiting and offers a retry.
+
+Two additional safeguards keep oversized prompts working within Groq's hard
+per-request cap (a single request may not exceed 8K tokens even in an empty
+window):
+
+- Before prompts are built, filler words and hesitations (um/uh/hmm, VN
+  ừ/ờ/ơ) are stripped from the evidence and the prompt instructs the model
+  to ignore remaining hesitations. Sanitization applies only to LLM input;
+  persisted transcripts stay byte-identical.
+- If the single finalization request is still rejected as too large, the
+  provider falls back to map-reduce: evidence is split into ~10KB chunks,
+  each chunk is extracted into structured MoM entries, and a final small
+  merge call assembles the MOM. This path extends the finalization timeout
+  (420s) and is not retried on repeated size rejections; the client sees a
+  "split the file" failure message instead.
 
 ---
 

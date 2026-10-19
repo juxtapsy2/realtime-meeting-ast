@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -82,6 +83,13 @@ func (o *OpenAIIntelligence) FinalizeMeeting(ctx context.Context, input Finaliza
 
 	response, err := o.callLLM(ctx, prompt, momSummaryFormat())
 	if err != nil {
+		var tooLarge *RequestTooLargeError
+		if errors.As(err, &tooLarge) {
+			// The single request exceeded the provider's hard cap (e.g. a
+			// dense written document). Split the evidence: extract entries
+			// per chunk, then merge them into the final MOM.
+			return o.finalizeChunked(ctx, input)
+		}
 		return MeetingSummary{}, fmt.Errorf("failed to call LLM: %w", err)
 	}
 
@@ -90,6 +98,48 @@ func (o *OpenAIIntelligence) FinalizeMeeting(ctx context.Context, input Finaliza
 		return MeetingSummary{}, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	return summary, nil
+}
+
+// finalizeChunked is the map-reduce fallback for evidence that exceeds the
+// provider's per-request token cap: extract MoM entries from bounded chunks,
+// then merge the entries into the final MOM with one small call.
+func (o *OpenAIIntelligence) finalizeChunked(ctx context.Context, input FinalizationInput) (MeetingSummary, error) {
+	evidence := strings.TrimSpace(strings.Join(
+		[]string{sanitizePromptText(input.FullTranscript), sanitizePromptText(input.DocumentText)}, "\n\n"))
+	if evidence == "" {
+		return MeetingSummary{}, fmt.Errorf("no evidence to summarize")
+	}
+	chunks := chunkText(evidence, chunkEvidenceBytes)
+	if len(chunks) == 0 {
+		return MeetingSummary{}, fmt.Errorf("no evidence to summarize")
+	}
+	log.Printf("finalization: evidence too large for one request, splitting into %d chunks", len(chunks))
+
+	var allEntries []MOMEntry
+	var allKeyPoints []string
+	for i, chunk := range chunks {
+		prompt := chunkExtractionPrompt(input.Title, o.glossary, i+1, len(chunks), chunk)
+		response, err := o.callLLM(ctx, prompt, chunkEntriesFormat())
+		if err != nil {
+			return MeetingSummary{}, fmt.Errorf("failed to call LLM for chunk %d/%d: %w", i+1, len(chunks), err)
+		}
+		entries, keyPoints, err := parseChunkEntries(response)
+		if err != nil {
+			return MeetingSummary{}, fmt.Errorf("failed to parse chunk %d/%d: %w", i+1, len(chunks), err)
+		}
+		allEntries = append(allEntries, entries...)
+		allKeyPoints = append(allKeyPoints, keyPoints...)
+	}
+
+	response, err := o.callLLM(ctx, mergePrompt(input.Title, o.glossary, allEntries, allKeyPoints), momSummaryFormat())
+	if err != nil {
+		return MeetingSummary{}, fmt.Errorf("failed to call LLM for merge: %w", err)
+	}
+	summary, err := parseFinalizationJSON(response)
+	if err != nil {
+		return MeetingSummary{}, fmt.Errorf("failed to parse response: %w", err)
+	}
 	return summary, nil
 }
 
@@ -218,6 +268,16 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string, respons
 		}
 	}
 
+	// Groq rejects a single request above the per-request token cap even in
+	// an empty window ("Request too large for model ... TPM: Limit 8000,
+	// Requested 9807"). Such requests are not billed and retrying them
+	// verbatim is pointless; surface a typed error so callers can shrink or
+	// split the prompt.
+	if resp.StatusCode != http.StatusOK && strings.Contains(apiErr.Error.Message, "Request too large") {
+		o.budget.Release(res)
+		return "", parseRequestTooLargeError(apiErr.Error.Message)
+	}
+
 	// Rejected requests are not billed, so give their reservation back.
 	if resp.StatusCode != http.StatusOK {
 		o.budget.Release(res)
@@ -273,6 +333,10 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string, respons
 // retryAfterMessage matches Groq's "Please try again in 39.915s." hint.
 var retryAfterMessage = regexp.MustCompile(`try again in ([0-9]+(?:\.[0-9]+)?)s`)
 
+// requestTooLargeMessage matches Groq's hard per-request rejection:
+// "Request too large for model ... TPM: Limit 8000, Requested 9807, ...".
+var requestTooLargeMessage = regexp.MustCompile(`Limit (\d+), Requested (\d+)`)
+
 // parseRetryAfter extracts the suggested wait from the Retry-After header,
 // falling back to the provider's error message. Zero when neither applies.
 func parseRetryAfter(headerValue, message string) time.Duration {
@@ -285,6 +349,17 @@ func parseRetryAfter(headerValue, message string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// parseRequestTooLargeError turns Groq's "Request too large" message into a
+// typed error carrying the reported limit/requested sizes when present.
+func parseRequestTooLargeError(message string) *RequestTooLargeError {
+	e := &RequestTooLargeError{Message: message}
+	if m := requestTooLargeMessage.FindStringSubmatch(message); len(m) == 3 {
+		e.Limit, _ = strconv.Atoi(m[1])
+		e.Requested, _ = strconv.Atoi(m[2])
+	}
+	return e
 }
 
 func (o *OpenAIIntelligence) parseAnalysisResponse(response string) (MeetingStatePatch, error) {

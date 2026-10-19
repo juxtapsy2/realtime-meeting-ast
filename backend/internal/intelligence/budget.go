@@ -20,9 +20,13 @@ const (
 	// known afterwards and also counts against the minute window.
 	completionReserve = 1_500
 
-	// estimateDivisor converts request bytes to a token estimate (the
-	// standard ~4 bytes per token heuristic).
-	estimateDivisor = 4
+	// estimateDivisor converts request bytes to a token estimate. The naive
+	// ~4 bytes/token understates mixed Vietnamese/English text with dense
+	// business identifiers (observed as low as ~2.65), which caused
+	// "Request too large" rejections. Estimate at ~2.6 bytes/token (i.e.
+	// len*5/13) so admission is conservative and rarely under-reserves.
+	estimateNumerator   = 5
+	estimateDenominator = 13
 )
 
 // ErrDailyTokenBudget is terminal: retrying cannot help until the provider's
@@ -32,7 +36,7 @@ var ErrDailyTokenBudget = errors.New("provider daily token budget exhausted")
 // estimateTokens approximates the cost of one request: prompt tokens (from
 // the marshaled body) plus headroom for the completion.
 func estimateTokens(requestBytes []byte) int {
-	return len(requestBytes)/estimateDivisor + completionReserve
+	return len(requestBytes)*estimateNumerator/estimateDenominator + completionReserve
 }
 
 type budgetEvent struct {
