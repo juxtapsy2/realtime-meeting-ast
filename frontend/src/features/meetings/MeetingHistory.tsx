@@ -16,9 +16,33 @@ interface MeetingHistoryProps {
   onBack: () => void;
 }
 
+// The server auto-starts MoM generation the moment a meeting is completed.
+// Generation is short (seconds), so a completed meeting without a summary and
+// with a recent end time is almost certainly mid-generation: show the pending
+// spinner for that window instead of "no summary". The spinner only applies to
+// meetings that have a transcript: an empty recording (an upload-for-MoM
+// meeting) returns from generation silently, and document uploads happen
+// outside any generation run — there the upload panel and Generate button
+// stay visible and the user starts the run explicitly.
+const SUMMARY_AUTO_PENDING_MS = 2 * 60 * 1000;
+// Safety cap: the server broadcasts meeting.summary / meeting.summary.failed
+// on both outcomes, so if neither arrives (e.g. the server died mid-run) the
+// UI falls back to manual generation instead of spinning forever.
+const SUMMARY_AUTO_PENDING_MAX_MS = 30 * 1000;
+
+// Meetings just stepped out of the room carry a completion status without an
+// ended_at timestamp yet; those count as freshly ended too.
+const autoPendingOnOpen = (meeting: Meeting): boolean => {
+  const { status, summary, ended_at } = meeting;
+  if (status !== 'completed' || summary) return false;
+  if (!ended_at) return true;
+  return Date.now() - new Date(ended_at).getTime() < SUMMARY_AUTO_PENDING_MS;
+};
+
 export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const [transcript, setTranscript] = useState<TranscriptEvent[]>([]);
   const [summary, setSummary] = useState<MeetingSummary | null>(meeting.summary || null);
+  const [autoPending, setAutoPending] = useState<boolean>(autoPendingOnOpen(meeting));
   const [documents, setDocuments] = useState<MeetingDocument[]>(meeting.documents || []);
   const [regenerating, setRegenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -79,6 +103,7 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   // Generation failed server-side: stop the pending state and tell the user
   // why, instead of leaving them waiting on a spinner that will never resolve.
   const handleSummaryFailed = useCallback((data: { message?: string }) => {
+    setAutoPending(false);
     setRegenerating(false);
     setToast(data?.message || 'Summary generation failed. Please retry.');
   }, []);
@@ -88,6 +113,13 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     const timer = setTimeout(() => setToast(null), 6000);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // See SUMMARY_AUTO_PENDING_MAX_MS above.
+  useEffect(() => {
+    if (!autoPending) return;
+    const timer = setTimeout(() => setAutoPending(false), SUMMARY_AUTO_PENDING_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [autoPending]);
 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
@@ -200,16 +232,18 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
             <h2 className="text-lg font-medium text-gray-900">Meeting Summary</h2>
           </div>
           <div className="max-h-64 overflow-y-auto border-b border-gray-200">
-            <DocumentsPanel
-              documents={documents}
-              onUpload={handleUploadDocuments}
-              onClear={handleClearDocuments}
-            />
+            {summary ? null : (
+              <DocumentsPanel
+                documents={documents}
+                onUpload={handleUploadDocuments}
+                onClear={handleClearDocuments}
+              />
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4">
             {summary ? (
               <SummaryPanel summary={summary} meeting={meeting} />
-            ) : regenerating ? (
+            ) : regenerating || (autoPending && (isLoading || transcript.length > 0)) ? (
               <SummaryPending />
             ) : (
               <SummaryMissing
