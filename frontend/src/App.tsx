@@ -51,20 +51,23 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-shell">
       <div className="max-w-4xl mx-auto px-6 pt-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Meeting Assistant</h1>
+        <div className="flex items-center gap-2.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-brand-500" aria-hidden />
+          <h1 className="text-xl font-bold tracking-tight text-ink">Meeting Assistant</h1>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowProviders(true)}
-            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+            className="px-3 py-1.5 text-sm rounded-lg border border-steel/50 text-ink hover:bg-canvas transition-colors"
           >
             Provider settings
           </button>
           {isAdmin && (
             <button
               onClick={() => setShowAdmin(true)}
-              className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+              className="px-3 py-1.5 text-sm rounded-lg border border-steel/50 text-ink hover:bg-canvas transition-colors"
             >
               Admin
             </button>

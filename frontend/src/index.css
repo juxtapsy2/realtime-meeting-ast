@@ -2,11 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
-    'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
-    'Helvetica Neue', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* All colors are utility classes sourced from tailwind.config.js so the
+   Tailwind CSS IntelliSense lens resolves and previews every one of them. */
+@layer base {
+  body {
+    margin: 0;
+    @apply bg-shell text-ink;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+      'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+      'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Inter at the default 400 makes button labels look faint; semibold
+     keeps them crisp without changing size. */
+  button {
+    @apply font-semibold;
+  }
+
+  ::selection {
+    @apply bg-brand-500 text-canvas;
+  }
 }

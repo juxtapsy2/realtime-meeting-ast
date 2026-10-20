@@ -23,7 +23,7 @@ function StatusBadge({ ok }: { ok: boolean }) {
   return (
     <span
       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+        ok ? "bg-brand-100 text-brand-700" : "bg-coral-100 text-coral-700"
       }`}
     >
       {ok ? "ok" : "error"}
@@ -186,7 +186,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
   if (!monitor) {
     return (
       <div className="h-screen flex items-center justify-center">
-        <div className="text-gray-500">{error ?? "Loading admin panel..."}</div>
+        <div className="text-muted">{error ?? "Loading admin panel..."}</div>
       </div>
     );
   }
@@ -195,32 +195,32 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
     <div className="h-screen flex flex-col max-w-5xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Admin</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
+          <h1 className="text-2xl font-bold text-ink">Admin</h1>
+          <p className="text-xs text-muted mt-0.5">
             Signed in as {monitor.viewer || "unknown"} · role:{" "}
             {monitor.viewer_role}
           </p>
         </div>
         <button
           onClick={onBack}
-          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+          className="px-3 py-1.5 text-sm rounded-lg border border-steel/50 text-ink hover:bg-canvas transition-colors"
         >
           Back to meetings
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-lg whitespace-pre-wrap">
+        <div className="mb-4 p-4 bg-coral-100 text-coral-700 rounded-lg whitespace-pre-wrap">
           {error}
         </div>
       )}
       {notice && (
-        <div className="mb-4 p-4 bg-green-50 text-green-700 rounded-lg">
+        <div className="mb-4 p-4 bg-brand-100 text-brand-700 rounded-lg">
           {notice}
         </div>
       )}
       {!isSuperAdmin && (
-        <div className="mb-4 p-4 bg-amber-50 text-amber-800 rounded-lg">
+        <div className="mb-4 p-4 bg-steel/25 text-ink rounded-lg">
           You have the admin role. You can edit the access list, and you can
           edit your own row under User API keys or in Provider settings.
           Changing platform provider defaults, other users' keys, and
@@ -229,52 +229,52 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">Database</div>
+        <div className="rounded-xl border border-steel/30 bg-canvas p-4">
+          <div className="text-xs text-muted mb-1">Database</div>
           <StatusBadge ok={monitor.database === "ok"} />
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">Auth gate</div>
+        <div className="rounded-xl border border-steel/30 bg-canvas p-4">
+          <div className="text-xs text-muted mb-1">Auth gate</div>
           <span
             className={`px-2 py-0.5 rounded-full text-xs font-medium ${
               monitor.auth_gate === "enabled"
-                ? "bg-green-100 text-green-700"
-                : "bg-amber-100 text-amber-700"
+                ? "bg-brand-100 text-brand-700"
+                : "bg-coral-100 text-coral-700"
             }`}
           >
             {monitor.auth_gate}
           </span>
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">Meetings</div>
-          <div className="text-lg font-medium text-gray-900">
+        <div className="rounded-xl border border-steel/30 bg-canvas p-4">
+          <div className="text-xs text-muted mb-1">Meetings</div>
+          <div className="text-lg font-medium text-ink">
             {monitor.meetings >= 0 ? monitor.meetings : "—"}
           </div>
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">Users</div>
-          <div className="text-lg font-medium text-gray-900">
+        <div className="rounded-xl border border-steel/30 bg-canvas p-4">
+          <div className="text-xs text-muted mb-1">Users</div>
+          <div className="text-lg font-medium text-ink">
             {monitor.users.length}
           </div>
-          <div className="text-xs text-gray-400">
+          <div className="text-xs text-muted">
             {monitor.users.filter((u) => u.use_own_keys).length} on own keys
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white mb-6">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="font-medium text-gray-900">Platform defaults</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
+      <div className="rounded-xl border border-steel/30 bg-canvas mb-6">
+        <div className="px-4 py-3 border-b border-wash">
+          <h2 className="font-medium text-ink">Platform defaults</h2>
+          <p className="text-xs text-muted mt-0.5">
             Supplied by deployment secrets. Keys are never returned, only
             whether they exist.
           </p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-4 py-3 text-sm">
           <div>
-            <div className="text-xs text-gray-400">STT</div>
-            <div className="text-gray-900">{monitor.platform.stt_provider}</div>
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-muted">STT</div>
+            <div className="text-ink">{monitor.platform.stt_provider}</div>
+            <div className="text-xs text-muted">
               {monitor.platform.google_stt
                 ? "service account"
                 : monitor.platform.stt_key_set
@@ -283,25 +283,25 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-400">LLM</div>
-            <div className="text-gray-900">{monitor.platform.llm_provider}</div>
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-muted">LLM</div>
+            <div className="text-ink">{monitor.platform.llm_provider}</div>
+            <div className="text-xs text-muted">
               {monitor.platform.llm_model || "default model"}
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-400">LLM key</div>
-            <div className="text-gray-900">
+            <div className="text-xs text-muted">LLM key</div>
+            <div className="text-ink">
               {monitor.platform.llm_key_set ? "configured" : "not configured"}
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-400">User key storage</div>
-            <div className="text-gray-900">
+            <div className="text-xs text-muted">User key storage</div>
+            <div className="text-ink">
               {monitor.platform.own_keys_ok ? "enabled" : "unavailable"}
             </div>
             {!monitor.platform.own_keys_ok && (
-              <div className="text-xs text-amber-600">
+              <div className="text-xs text-coral-600">
                 AUTH_HMAC_SECRET missing
               </div>
             )}
@@ -309,20 +309,20 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white mb-6">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="font-medium text-gray-900">User API keys</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
+      <div className="rounded-xl border border-steel/30 bg-canvas mb-6">
+        <div className="px-4 py-3 border-b border-wash">
+          <h2 className="font-medium text-ink">User API keys</h2>
+          <p className="text-xs text-muted mt-0.5">
             Each user either uses the platform defaults or their own providers.
             Keys are encrypted before storage and cannot be read back.
           </p>
         </div>
         {monitor.users.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-gray-400">No users yet.</p>
+          <p className="px-4 py-6 text-sm text-muted">No users yet.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+              <tr className="text-left text-xs text-muted border-b border-wash">
                 <th className="px-4 py-2">User</th>
                 <th className="px-4 py-2">Mode</th>
                 <th className="px-4 py-2">STT</th>
@@ -352,11 +352,11 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
         )}
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white mb-6">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
+      <div className="rounded-xl border border-steel/30 bg-canvas mb-6">
+        <div className="px-4 py-3 border-b border-wash flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-medium text-gray-900">Who can use this</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <h2 className="font-medium text-ink">Who can use this</h2>
+            <p className="text-xs text-muted mt-0.5">
               Everyone else is refused at sign-in. Press Enter or comma to add,
               or paste a list. The superadmin is always allowed.
             </p>
@@ -364,8 +364,8 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
           <span
             className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
               monitor.auth_gate === "enabled"
-                ? "bg-green-100 text-green-700"
-                : "bg-amber-100 text-amber-700"
+                ? "bg-brand-100 text-brand-700"
+                : "bg-coral-100 text-coral-700"
             }`}
           >
             {monitor.auth_gate === "enabled"
@@ -380,7 +380,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
             onChange={handleSaveAllowed}
           />
           <div className="mt-3 flex items-center justify-between">
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-muted">
               {allowedDirty && "Unsaved changes."}
               {allowedSetting?.set &&
                 " Currently overridden from the deployment value."}
@@ -390,7 +390,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
                 <button
                   onClick={handleResetAllowed}
                   disabled={busy}
-                  className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+                  className="text-xs text-muted hover:text-coral-600 disabled:opacity-50"
                 >
                   reset to deployment value
                 </button>
@@ -398,7 +398,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
               <button
                 onClick={handleSaveAllowedCommit}
                 disabled={busy || !allowedDirty}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 bg-brand-500 text-ink font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors disabled:opacity-50"
               >
                 {busy ? "Saving..." : "Save access list"}
               </button>
@@ -407,10 +407,10 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white mb-6">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="font-medium text-gray-900">Administrators</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
+      <div className="rounded-xl border border-steel/30 bg-canvas mb-6">
+        <div className="px-4 py-3 border-b border-wash">
+          <h2 className="font-medium text-ink">Administrators</h2>
+          <p className="text-xs text-muted mt-0.5">
             Admins can edit the access list and monitor operational state.
             Granting or revoking administrators is left to the superadmin, who
             is configured only through the SUPERADMIN_EMAIL environment
@@ -419,26 +419,26 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
         </div>
         <div className="px-4 py-3">
           <div className="mb-3">
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-muted">
               Superadmin (env-configured)
             </div>
-            <div className="text-sm text-gray-900">
+            <div className="text-sm text-ink">
               {monitor.superadmin || "not configured"}
             </div>
           </div>
           {monitor.admins.length > 0 ? (
-            <ul className="divide-y divide-gray-50 mb-3">
+            <ul className="divide-y divide-wash mb-3">
               {monitor.admins.map((email) => (
                 <li
                   key={email}
                   className="py-2 flex items-center justify-between"
                 >
-                  <span className="text-sm text-gray-700">{email}</span>
+                  <span className="text-sm text-ink">{email}</span>
                   {isSuperAdmin && (
                     <button
                       onClick={() => handleRemoveAdmin(email)}
                       disabled={busy}
-                      className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+                      className="text-xs text-muted hover:text-coral-600 disabled:opacity-50"
                     >
                       remove
                     </button>
@@ -447,7 +447,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-gray-400 mb-3">No administrators yet.</p>
+            <p className="text-sm text-muted mb-3">No administrators yet.</p>
           )}
           {isSuperAdmin && (
             <div className="flex gap-2">
@@ -456,12 +456,12 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
                 value={newAdminEmail}
                 onChange={(e) => setNewAdminEmail(e.target.value)}
                 placeholder="admin@example.com"
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-3 py-1.5 text-sm bg-canvas border border-steel/50 rounded-lg text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               <button
                 onClick={handleAddAdmin}
                 disabled={busy || !newAdminEmail.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 bg-brand-500 text-ink font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors disabled:opacity-50"
               >
                 Add admin
               </button>
@@ -470,18 +470,18 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="font-medium text-gray-900">Audit log</h2>
+      <div className="rounded-xl border border-steel/30 bg-canvas">
+        <div className="px-4 py-3 border-b border-wash">
+          <h2 className="font-medium text-ink">Audit log</h2>
         </div>
         {monitor.audit.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-gray-400">
+          <p className="px-4 py-6 text-sm text-muted">
             No configuration changes yet.
           </p>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+              <tr className="text-left text-xs text-muted border-b border-wash">
                 <th className="px-4 py-2">Time</th>
                 <th className="px-4 py-2">Actor</th>
                 <th className="px-4 py-2">Action</th>
@@ -492,27 +492,27 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
               {monitor.audit.map((a: AuditEntry) => (
                 <tr
                   key={`${a.setting_key}-${a.created_at}`}
-                  className="border-b border-gray-50 last:border-0"
+                  className="border-b border-wash last:border-0"
                 >
-                  <td className="px-4 py-2 text-gray-500">
+                  <td className="px-4 py-2 text-muted">
                     {new Date(a.created_at).toLocaleString()}
                   </td>
-                  <td className="px-4 py-2 text-gray-700">
+                  <td className="px-4 py-2 text-ink">
                     {a.admin_email}
-                    <span className="ml-1 text-xs text-gray-400">{a.role}</span>
+                    <span className="ml-1 text-xs text-muted">{a.role}</span>
                   </td>
                   <td className="px-4 py-2">
                     <span
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                         a.action === "set"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-amber-100 text-amber-700"
+                          ? "bg-brand-100 text-brand-700"
+                          : "bg-coral-100 text-coral-700"
                       }`}
                     >
                       {a.action}
                     </span>
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-gray-700">
+                  <td className="px-4 py-2 font-mono text-xs text-ink">
                     {a.setting_key}
                   </td>
                 </tr>

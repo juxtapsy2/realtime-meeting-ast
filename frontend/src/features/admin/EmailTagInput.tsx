@@ -85,14 +85,14 @@ export function EmailTagInput({
           const input = document.getElementById(id ?? '');
           input?.focus();
         }}
-        className={`flex flex-wrap items-center gap-1.5 p-2 rounded-lg border border-gray-300 bg-white min-h-[38px] ${
-          disabled ? 'bg-gray-50' : ''
-        } ${invalid.length > 0 ? 'border-red-300' : 'focus-within:ring-2 focus-within:ring-blue-500'}`}
+        className={`flex flex-wrap items-center gap-1.5 p-2 rounded-lg border border-steel/50 bg-canvas min-h-[38px] ${
+          disabled ? 'bg-wash' : ''
+        } ${invalid.length > 0 ? 'border-coral-400' : 'focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500'}`}
       >
         {value.map((email) => (
           <span
             key={email}
-            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs"
+            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 bg-brand-100 text-brand-700 rounded-full text-xs"
           >
             {email}
             {!disabled && (
@@ -103,7 +103,7 @@ export function EmailTagInput({
                   remove(email);
                 }}
                 aria-label={`Remove ${email}`}
-                className="w-4 h-4 rounded-full hover:bg-blue-200 flex items-center justify-center"
+                className="w-4 h-4 rounded-full hover:bg-brand-300/60 flex items-center justify-center"
               >
                 ×
               </button>
@@ -127,11 +127,11 @@ export function EmailTagInput({
           }}
           onKeyDown={handleKeyDown}
           placeholder={value.length === 0 ? placeholder : ''}
-          className="flex-1 min-w-[180px] px-1 py-0.5 text-sm outline-none bg-transparent"
+          className="flex-1 min-w-[180px] px-1 py-0.5 text-sm text-ink outline-none bg-transparent placeholder:text-steel"
         />
       </div>
       {invalid.length > 0 && (
-        <p className="mt-1 text-xs text-red-600">
+        <p className="mt-1 text-xs text-coral-700">
           Not a valid email address: {invalid.join(', ')}
         </p>
       )}

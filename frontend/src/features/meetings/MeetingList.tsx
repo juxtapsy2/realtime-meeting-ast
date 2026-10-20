@@ -103,14 +103,15 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
   };
 
   const getStatusBadge = (status: string) => {
-    const colors = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      active: 'bg-green-100 text-green-800',
-      paused: 'bg-amber-100 text-amber-800',
-      completed: 'bg-blue-100 text-blue-800',
+    const dots = {
+      pending: 'bg-steel',
+      active: 'bg-brand-500',
+      paused: 'bg-ink/40',
+      completed: 'bg-ink',
     };
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors[status as keyof typeof colors]}`}>
+      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium capitalize bg-canvas border border-steel/40 text-ink">
+        <span className={`w-1.5 h-1.5 rounded-full ${dots[status as keyof typeof dots] ?? 'bg-steel'}`} />
         {status}
       </span>
     );
@@ -125,22 +126,22 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
   ];
 
   const valueMappings = {
-    id: (value: unknown) => <span className="text-xs text-gray-400">#{String(value)}</span>,
+    id: (value: unknown) => <span className="text-xs text-muted">#{String(value)}</span>,
     status: (value: unknown) => getStatusBadge(String(value)),
     created_at: (value: unknown) => new Date(String(value)).toLocaleString(),
   };
 
   const customFields = {
     title: (row: Meeting) => (
-      <div className="font-medium text-gray-900 truncate block text-ellipsis max-w-[300px]">
+      <div className="font-medium text-ink truncate block text-ellipsis max-w-[300px]">
         {row.title}
-        {row.summary?.title && <div className="text-sm text-gray-500 truncate">{row.summary.title}</div>}
+        {row.summary?.title && <div className="text-sm text-muted truncate">{row.summary.title}</div>}
       </div>
     ),
     actions: (row: Meeting) => (
       <button
         onClick={(e) => handleDeleteMeeting(row.id, e)}
-        className="text-gray-400 hover:text-red-500 transition-colors"
+        className="text-muted hover:text-coral-600 transition-colors"
         title="Delete meeting"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,15 +154,15 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading meetings...</div>
+        <div className="text-muted">Loading meetings...</div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col max-w-4xl mx-auto p-6">
+    <div className="h-screen flex flex-col max-w-4xl mx-auto px-6 pb-6 pt-4">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold text-gray-900 mb-4">Meetings</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-ink mb-4">Meetings</h1>
 
         <form onSubmit={handleCreateMeeting} className="flex gap-2">
           <input
@@ -169,13 +170,13 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
             value={newMeetingTitle}
             onChange={(e) => setNewMeetingTitle(e.target.value)}
             placeholder="Enter meeting title..."
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 px-4 py-2 bg-canvas border border-steel/50 rounded-lg text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
             disabled={isCreating}
           />
           <button
             type="submit"
             disabled={isCreating || !newMeetingTitle.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-brand-300 !text-ink font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isCreating ? 'Creating...' : 'New Meeting'}
           </button>
@@ -183,9 +184,9 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-lg flex items-center justify-between">
+        <div className="mb-4 p-4 bg-coral-100 text-coral-700 rounded-lg flex items-center justify-between border border-coral-300">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+          <button onClick={() => setError(null)} className="text-coral-600 hover:text-coral-700">
             ×
           </button>
         </div>
@@ -194,11 +195,11 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
       {meetings.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-gray-500">No meetings yet. Create your first meeting above!</p>
+            <p className="text-muted">No meetings yet. Create your first meeting above!</p>
           </div>
         </div>
       ) : (
-        <>
+        <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-steel/30 bg-canvas overflow-hidden">
           <DataTable
             columns={columns}
             data={meetings}
@@ -214,22 +215,22 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
             onRevealMore={loadMore}
           />
 
-          <div className="pt-3 border-t border-gray-200 flex items-center justify-between">
-            <span className="text-sm text-gray-500">
+          <div className="px-4 py-3 border-t border-steel/30 flex items-center justify-between shrink-0">
+            <span className="text-sm text-muted">
               Showing {Math.min(visibleCount, meetings.length)} of {total} meetings
             </span>
             {isSyncing ? (
-              <span className="text-sm text-gray-400">Syncing remaining meetings...</span>
+              <span className="text-sm text-muted">Syncing remaining meetings...</span>
             ) : syncError ? (
-              <span className="text-sm text-red-500">
+              <span className="text-sm text-coral-600">
                 Failed to load some meetings.{' '}
-                <button onClick={() => void loadMeetings()} className="underline hover:text-red-700">
+                <button onClick={() => void loadMeetings()} className="underline hover:text-coral-700">
                   Retry
                 </button>
               </span>
             ) : null}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

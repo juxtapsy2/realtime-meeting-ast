@@ -39,7 +39,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (state === 'loading') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">
+      <div className="min-h-screen bg-shell flex items-center justify-center text-muted">
         Checking access...
       </div>
     );
@@ -47,21 +47,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (state === 'denied') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <h1 className="text-lg font-medium text-gray-900 mb-1">Access restricted</h1>
-          <p className="text-sm text-gray-500 mb-6">
+      <div className="min-h-screen bg-shell flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-canvas rounded-xl border border-steel/30 p-8">
+          <div className="flex items-center gap-2.5 mb-4">
+            <span className="w-2.5 h-2.5 rounded-full bg-brand-500" aria-hidden />
+            <h1 className="text-lg font-semibold tracking-tight text-ink">Access restricted</h1>
+          </div>
+          <p className="text-sm text-muted mb-6">
             This meeting assistant is available to authorized users only.
             Sign in with the Google account allowed by your organization.
           </p>
           {denied && (
-            <p className="text-sm text-red-600 mb-4">
+            <p className="text-sm text-coral-700 mb-4">
               Your Google account is not on the authorized list.
             </p>
           )}
           <a
             href={GOOGLE_START_URL}
-            className="flex items-center justify-center gap-2 w-full px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
+            className="flex items-center justify-center gap-2 w-full px-3 py-2 text-sm font-semibold text-ink bg-brand-500 rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors"
           >
             Continue with Google
           </a>
@@ -74,10 +77,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     <>
       {currentUser && (
         <div className="fixed top-3 right-3 z-50 flex items-center gap-3 text-xs">
-          <span className="text-gray-400">{currentUser}</span>
+          <span className="text-muted">{currentUser}</span>
           <button
             onClick={handleLogout}
-            className="px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+            className="px-2.5 py-1 rounded-lg border border-steel/50 text-ink hover:bg-canvas transition-colors"
           >
             Sign out
           </button>

@@ -191,23 +191,34 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col bg-shell">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
+      <header className="bg-canvas border-b border-steel/30 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={onBack}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-muted hover:text-ink transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
             </button>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">{meeting.title}</h1>
-              <p className="text-sm text-gray-500">
-                Status: {isPaused ? 'Paused' : isMeetingActive ? 'Recording' : meeting.status}
+              <h1 className="text-xl font-semibold tracking-tight text-ink">{meeting.title}</h1>
+              <p className="text-sm text-muted flex items-center gap-2">
+                {isMeetingActive && !isPaused && (
+                  <span className="inline-flex items-center gap-1.5 font-medium text-coral-600">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-coral-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-coral-500" />
+                    </span>
+                    Recording
+                  </span>
+                )}
+                <span>
+                  Status: {isPaused ? 'Paused' : isMeetingActive ? 'Recording' : meeting.status}
+                </span>
               </p>
             </div>
           </div>
@@ -215,8 +226,8 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
           <div className="flex items-center gap-4">
             {/* Connection status */}
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-              <span className="text-sm text-gray-500">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-brand-500' : 'bg-coral-500'}`} />
+              <span className="text-sm text-muted">
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
@@ -226,7 +237,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
               <button
                 onClick={handleStartMeeting}
                 disabled={!isConnected}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-brand-300 !text-ink font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Start Meeting
               </button>
@@ -236,7 +247,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
                   <button
                     onClick={handlePauseMeeting}
                     disabled={!isConnected}
-                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 border border-steel/50 text-ink rounded-lg hover:bg-wash transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Pause
                   </button>
@@ -244,7 +255,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
                   <button
                     onClick={handleResumeMeeting}
                     disabled={!isConnected}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-brand-500 text-ink font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Resume
                   </button>
@@ -252,7 +263,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
                 <button
                   onClick={handleEndMeeting}
                   disabled={!isConnected}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-coral-500 text-white font-semibold rounded-lg hover:bg-coral-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   End Meeting
                 </button>
@@ -263,10 +274,10 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
             <button
               onClick={handleToggleMic}
               disabled={!isConnected || !isMeetingActive || isPaused}
-              className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 isMicActive && audioSource === 'microphone'
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-coral-100 text-coral-700 font-semibold'
+                  : 'bg-wash text-ink hover:bg-steel/30'
               }`}
             >
               {isMicActive && audioSource === 'microphone' ? 'Stop Mic' : 'Use Mic'}
@@ -274,10 +285,10 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
             <button
               onClick={handleToggleSystemAudio}
               disabled={!isConnected || !isMeetingActive || isPaused}
-              className={`px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 isMicActive && audioSource === 'system'
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-coral-100 text-coral-700 font-semibold'
+                  : 'bg-wash text-ink hover:bg-steel/30'
               }`}
             >
               {isMicActive && audioSource === 'system' ? 'Stop System Audio' : 'Use System Audio'}
@@ -291,7 +302,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
           isReconnecting only turns true after a real drop, so the banner
           does not flash during the initial connection. */}
       {isMeetingActive && isReconnecting && (
-        <div role="alert" className="bg-red-50 border-b border-red-200 px-6 py-2 text-sm text-red-700">
+        <div role="alert" className="bg-coral-100 border-b border-coral-300 px-6 py-2 text-sm text-coral-700">
           Connection lost — reconnecting… Audio is not being recorded right now.
         </div>
       )}
@@ -299,9 +310,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Transcript panel */}
-        <div className="flex-1 flex flex-col border-r border-gray-200">
-          <div className="px-4 py-3 bg-white border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">Live Transcript</h2>
+        <div className="flex-1 flex flex-col border-r border-steel/30">
+          <div className="px-4 py-3 bg-canvas border-b border-steel/30">
+            <h2 className="text-lg font-medium text-ink">Live Transcript</h2>
           </div>
           <TranscriptPanel
             transcript={transcript}
@@ -311,9 +322,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
         </div>
 
         {/* Intelligence panel */}
-        <div className="w-96 flex flex-col bg-white">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">AI Insights</h2>
+        <div className="w-96 flex flex-col bg-canvas">
+          <div className="px-4 py-3 border-b border-steel/30">
+            <h2 className="text-lg font-medium text-ink">AI Insights</h2>
           </div>
           <IntelligencePanel meetingState={meetingState} />
         </div>

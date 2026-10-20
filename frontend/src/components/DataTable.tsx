@@ -128,13 +128,13 @@ export function DataTable<T>({
   return (
     <div ref={scrollRef} className={`flex-1 min-h-0 overflow-y-auto ${className ?? ''}`}>
       {sortedData.length === 0 ? (
-        <div className="h-full flex items-center justify-center text-gray-500">
+        <div className="h-full flex items-center justify-center text-muted">
           {emptyMessage ?? 'No data'}
         </div>
       ) : (
         <>
           <table className="w-full text-left">
-            <thead className="sticky top-0 bg-white z-10 border-b border-gray-200">
+            <thead className="sticky top-0 bg-canvas z-10 border-b border-steel/30">
               <tr>
                 {columns.map((col) => {
                   const isSortable = enableSort && !!col.sortable;
@@ -143,19 +143,19 @@ export function DataTable<T>({
                     <th
                       key={col.field}
                       style={col.width ? { width: col.width } : undefined}
-                      className={`py-3 px-4 text-xs uppercase tracking-wide text-gray-500 font-medium ${col.align === 'right' ? 'text-right' : ''}`}
+                      className={`py-3 px-4 text-xs uppercase tracking-wide text-muted font-medium ${col.align === 'right' ? 'text-right' : ''}`}
                     >
                       {isSortable ? (
                         <button
                           type="button"
                           onClick={() => handleSort(col.field)}
-                          className="inline-flex items-center gap-1 hover:text-gray-700"
+                          className="inline-flex items-center gap-1 hover:text-ink transition-colors"
                         >
                           <span>{col.label}</span>
                           {isActive ? (
                             <span>{sort?.direction === 'asc' ? '▲' : '▼'}</span>
                           ) : (
-                            <span className="text-gray-300">▲</span>
+                            <span className="text-steel/60">▲</span>
                           )}
                         </button>
                       ) : (
@@ -171,8 +171,8 @@ export function DataTable<T>({
                 <tr
                   key={rowKey(row)}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={`border-b border-gray-100 ${
-                    onRowClick ? 'cursor-pointer hover:bg-blue-50/50 transition-colors' : ''
+                  className={`border-b border-wash ${
+                    onRowClick ? 'cursor-pointer hover:bg-wash/60 transition-colors' : ''
                   } ${getRowClassName?.(row) ?? ''}`}
                 >
                   {columns.map((col) => (
@@ -190,9 +190,9 @@ export function DataTable<T>({
 
           <div ref={sentinelRef} className="flex items-center justify-center h-12 text-sm">
             {hasMoreRows ? (
-              <span className="text-gray-400">Scroll for more</span>
+              <span className="text-muted">Scroll for more</span>
             ) : (
-              <span className="text-gray-400">End of list</span>
+              <span className="text-muted">End of list</span>
             )}
           </div>
         </>

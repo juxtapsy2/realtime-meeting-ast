@@ -49,22 +49,22 @@ export function UserProviderRow({
   }
 
   return (
-    <tr className="border-b border-gray-50 last:border-0 align-top">
+    <tr className="border-b border-wash last:border-0 align-top">
       <td className="px-4 py-3">
-        <div className="text-sm font-medium text-gray-900">{user.email}</div>
-        <div className="text-xs text-gray-400">
+        <div className="text-sm font-medium text-ink">{user.email}</div>
+        <div className="text-xs text-muted">
           {user.meetings} meeting{user.meetings === 1 ? '' : 's'} ·{' '}
           {user.effective_source === 'own_keys' ? 'own keys' : 'platform defaults'}
         </div>
         {user.updated_at && (
-          <div className="text-xs text-gray-400">
+          <div className="text-xs text-muted">
             updated {new Date(user.updated_at).toLocaleString()}
             {user.updated_by ? ` by ${user.updated_by}` : ''}
           </div>
         )}
       </td>
       <td className="px-4 py-3">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
+        <label className="flex items-center gap-2 text-sm text-ink">
           <input
             type="checkbox"
             checked={useOwn}
@@ -82,7 +82,7 @@ export function UserProviderRow({
             disabled={!canEdit}
             onChange={(e) => setSttProvider(e.target.value)}
             placeholder="stt provider"
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg disabled:bg-gray-50"
+            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
           <input
             type="password"
@@ -90,7 +90,7 @@ export function UserProviderRow({
             disabled={!canEdit}
             onChange={(e) => setSttKey(e.target.value)}
             placeholder={user.stt_key_set ? '•••••••• (stored)' : 'no STT key'}
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg disabled:bg-gray-50"
+            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
         </div>
       </td>
@@ -102,7 +102,7 @@ export function UserProviderRow({
             disabled={!canEdit}
             onChange={(e) => setLlmProvider(e.target.value)}
             placeholder="llm provider"
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg disabled:bg-gray-50"
+            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
           <input
             type="text"
@@ -110,7 +110,7 @@ export function UserProviderRow({
             disabled={!canEdit}
             onChange={(e) => setLlmModel(e.target.value)}
             placeholder="llm model"
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg disabled:bg-gray-50"
+            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
           <input
             type="password"
@@ -118,7 +118,7 @@ export function UserProviderRow({
             disabled={!canEdit}
             onChange={(e) => setLlmKey(e.target.value)}
             placeholder={user.llm_key_set ? '•••••••• (stored)' : 'no LLM key'}
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded-lg disabled:bg-gray-50"
+            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
         </div>
       </td>
@@ -128,7 +128,7 @@ export function UserProviderRow({
             <button
               onClick={handleSave}
               disabled={busy}
-              className="text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
+              className="text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50"
             >
               save
             </button>
@@ -142,7 +142,7 @@ export function UserProviderRow({
                   })
                 }
                 disabled={busy}
-                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+                className="text-xs text-muted hover:text-coral-600 disabled:opacity-50"
               >
                 clear STT key
               </button>
@@ -157,7 +157,7 @@ export function UserProviderRow({
                   })
                 }
                 disabled={busy}
-                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+                className="text-xs text-muted hover:text-coral-600 disabled:opacity-50"
               >
                 clear LLM key
               </button>
@@ -166,7 +166,7 @@ export function UserProviderRow({
               <button
                 onClick={() => onReset(user.email)}
                 disabled={busy}
-                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+                className="text-xs text-muted hover:text-coral-600 disabled:opacity-50"
               >
                 reset
               </button>
