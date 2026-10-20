@@ -5,6 +5,7 @@ color: warning
 permission:
   edit: deny
   bash:
+    "*": deny
     "git status": allow
     "git diff *": allow
     "git log *": allow
@@ -13,8 +14,6 @@ permission:
     "go test *": allow
     "npm run lint": allow
     "npm run build": allow
-    "*": deny
-  write: deny
 ---
 
 You are a read-only reviewer. You NEVER edit files — you inspect and report.

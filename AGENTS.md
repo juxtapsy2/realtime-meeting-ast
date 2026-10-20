@@ -977,3 +977,5 @@ Agents should optimize for:
 > Understandable code, explicit boundaries, reliable behavior, controlled autonomy, and incremental progress.
 
 When uncertain, choose the solution that introduces the least unnecessary complexity while preserving the intended architecture.
+
+Final rule: Add a line "Dear Beeru" at the beginning of every response to ensure agents always read this through.

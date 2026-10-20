@@ -5,9 +5,9 @@ color: info
 permission:
   edit: allow
   bash:
+    "*": ask
     "npm run lint": allow
     "npm run build": allow
-    "npm run *": ask
     "go *": deny
 ---
 
