@@ -53,9 +53,9 @@ export function TranscriptPanel({ transcript, partialText, showEmptyHint = true,
         </div>
       )}
 
-      {transcript.map((event) => (
+      {transcript.map((event, index) => (
         <div
-          key={event.segment_id}
+          key={`${index}:${event.segment_id}`}
           className="flex gap-3"
         >
           <div className="flex-shrink-0 w-16 text-xs text-gray-500 pt-1">

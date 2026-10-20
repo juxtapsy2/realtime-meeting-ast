@@ -35,7 +35,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
 
   const handleTranscriptFinal = useCallback((event: TranscriptEvent) => {
     setTranscript((prev) =>
-      prev.some((s) => s.segment_id === event.segment_id) ? prev : [...prev, event],
+      event.segment_id && prev.some((s) => s.segment_id === event.segment_id)
+        ? prev
+        : [...prev, event],
     );
     setPartialText('');
   }, []);
@@ -67,16 +69,18 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   // Merges the server-persisted transcript with what this session already
   // rendered. Finals are stable evidence with stable IDs, so a segment_id
   // set-union never duplicates and never drops live events received while
-  // the fetch was in flight.
+  // the fetch was in flight. Events without a segment_id are always kept:
+  // there is nothing to dedupe them by.
   const mergeTranscript = useCallback((persisted: TranscriptEvent[]) => {
     setTranscript((live) => {
       const merged = [...persisted];
-      const seen = new Set(persisted.map((s) => s.segment_id));
+      const seen = new Set(persisted.filter((s) => s.segment_id).map((s) => s.segment_id));
       for (const event of live) {
-        if (!seen.has(event.segment_id)) {
+        if (event.segment_id) {
+          if (seen.has(event.segment_id)) continue;
           seen.add(event.segment_id);
-          merged.push(event);
         }
+        merged.push(event);
       }
       merged.sort((a, b) => a.start_time - b.start_time);
       return merged;

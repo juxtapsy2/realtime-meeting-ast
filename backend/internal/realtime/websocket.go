@@ -2,6 +2,8 @@ package realtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -124,7 +126,29 @@ func HandleWebSocket(hub *Hub, meetingSvc MeetingService, w http.ResponseWriter,
 
 	go client.writePump()
 	go client.readPump(transcriber, meetingSvc, cancel)
-	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID)
+	go client.transcriptPump(transcriber, meetingSvc, hub, meetingID, newSessionID())
+}
+
+// newSessionID returns a random token identifying one WebSocket connection's
+// transcription session. Segment counters restart with every connection, so
+// without this prefix a reconnect mints segment IDs that collide with
+// pre-disconnect segments of the same meeting.
+func newSessionID() string {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(buf)
+}
+
+// qualifySegmentID prefixes a provider's segment ID with the connection
+// session token, making it unique across reconnects within a meeting.
+// Empty IDs (partial transcripts) are passed through unchanged.
+func qualifySegmentID(sessionID, segmentID string) string {
+	if segmentID == "" {
+		return ""
+	}
+	return sessionID + "_" + segmentID
 }
 
 func (c *Client) readPump(transcriber transcription.Transcriber, meetingSvc MeetingService, cancel context.CancelFunc) {
@@ -224,9 +248,15 @@ func (c *Client) transcriptPump(
 	meetingSvc MeetingService,
 	hub *Hub,
 	meetingID int,
+	sessionID string,
 ) {
 	for event := range transcriber.Events() {
 		event.MeetingID = strconv.Itoa(meetingID)
+		// Qualify finals BEFORE broadcast and persistence so the emitted
+		// event and the stored segment share the same globally unique ID.
+		if event.Final {
+			event.SegmentID = qualifySegmentID(sessionID, event.SegmentID)
+		}
 
 		eventType := "transcript.partial"
 		if event.Final {
