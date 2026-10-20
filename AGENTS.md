@@ -765,6 +765,32 @@ when useful for understanding or reviewing work.
 
 Never discard user changes.
 
+## 29.1 Branch Isolation
+
+When several agents run in parallel, each in its own terminal against the same checkout.
+When the user has asked for commits or pull requests:
+
+```text
+never commit to main
+    ↓
+create a dedicated branch per agent/session/task
+    ↓
+commit only that agent's own changes
+    ↓
+push the branch and open a PR against main
+```
+
+Rules:
+
+* Always branch first (for example `agent/<short-task-slug>`). Direct commits to `main` are
+  forbidden, even when explicitly asked to commit.
+* One agent owns one branch. Never reuse, check out, or push to another agent's branch.
+* Stage only files you changed. Never `git add -A` or revert/overwrite another agent's or the
+  user's uncommitted work to get a clean tree.
+* Deliver work through a PR instead of merging into `main` yourself; the user reviews and merges.
+* Commit/PR operations still require an explicit request as per the rules above — this section
+  defines *where* the work goes once that request is made, not permission to commit on its own.
+
 ---
 
 # 30. Existing User Work
