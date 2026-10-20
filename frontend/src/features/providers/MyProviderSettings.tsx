@@ -152,6 +152,10 @@ export function MyProviderSettings({ onBack }: MyProviderSettingsProps) {
             Keys are encrypted before storage and cannot be read back. Leave a key blank to keep
             the one already stored.
           </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Only these providers are supported today — LLM: groq, openai, gemini · STT: deepgram,
+            openai, groq, google. Any other value falls back to the platform default.
+          </p>
         </div>
         <table className="w-full text-sm">
           <thead>
