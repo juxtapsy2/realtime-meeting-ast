@@ -89,7 +89,7 @@ export function DocumentsPanel({ documents, onUpload, onClear }: DocumentsPanelP
               key={doc.name}
               className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1"
             >
-              <span className="truncate text-gray-700" title={doc.name}>
+              <span className="block truncate text-gray-700 text-ellipsis" title={doc.name}>
                 {doc.name}
               </span>
               <span className="ml-2 shrink-0 text-gray-400">{doc.chars.toLocaleString()} chars</span>

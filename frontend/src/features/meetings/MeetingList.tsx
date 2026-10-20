@@ -132,7 +132,7 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
 
   const customFields = {
     title: (row: Meeting) => (
-      <div className="font-medium text-gray-900 truncate">
+      <div className="font-medium text-gray-900 truncate block text-ellipsis max-w-[300px]">
         {row.title}
         {row.summary?.title && <div className="text-sm text-gray-500 truncate">{row.summary.title}</div>}
       </div>
