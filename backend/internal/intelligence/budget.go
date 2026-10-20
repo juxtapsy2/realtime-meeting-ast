@@ -7,14 +7,40 @@ import (
 	"time"
 )
 
-// Published token limits for the Groq free tier (openai/gpt-oss-120b):
-// 8K tokens per minute and 200K tokens per day. The budget gate admits a
-// request only when the estimated cost fits both limits, so the client stays
-// under them proactively instead of learning about an overshoot from a 429.
+// TokenLimits declares a provider credential's published token quotas.
+// A zero field disables that gate: no proactive limit is known (or the
+// provider enforces its own via 429s), so requests are admitted freely and
+// the reactive RateLimitError handling takes over.
+type TokenLimits struct {
+	PerMinute int
+	PerDay    int
+}
+
+// providerTokenLimits maps an API base URL to its published quotas. Limits
+// are keyed by base URL because they belong to the provider account, not to
+// an individual client (see budgetFor). A provider missing from this table
+// runs ungated — add an entry to give it proactive admission control.
+//
+// Current values:
+//   - groq free tier (openai/gpt-oss-120b): 8K TPM / 200K TPD
+//   - openai: 1M TPM (strictest published tier: Build, non-Luna models),
+//     no daily quota published (RPM is not tracked because TPM binds first
+//     for our request profile: ~10K-token requests hit 1M TPM at ~100 req/min,
+//     well under the 5,000 RPM floor). Higher tiers (Launch/Grow) simply
+//     never reach a gate sized for the lowest tier.
+var providerTokenLimits = map[string]TokenLimits{
+	"https://api.groq.com/openai/v1": {PerMinute: 8_000, PerDay: 200_000},
+	"https://api.openai.com/v1":      {PerMinute: 1_000_000},
+}
+
+// limitsFor returns the proactive quotas for a base URL; unknown providers
+// get TokenLimits{} (ungated).
+func limitsFor(baseURL string) TokenLimits {
+	return providerTokenLimits[baseURL]
+}
+
 const (
-	minuteTokenLimit = 8_000
-	dayTokenLimit    = 200_000
-	tokenWindow      = time.Minute
+	tokenWindow = time.Minute
 
 	// completionReserve holds back headroom for the response, which is only
 	// known afterwards and also counts against the minute window.
@@ -67,12 +93,12 @@ type TokenBudget struct {
 	dayLimit  int
 }
 
-func newTokenBudget() *TokenBudget {
+func newTokenBudget(limits TokenLimits) *TokenBudget {
 	return &TokenBudget{
 		now:       time.Now,
 		windowLen: tokenWindow,
-		minLimit:  minuteTokenLimit,
-		dayLimit:  dayTokenLimit,
+		minLimit:  limits.PerMinute,
+		dayLimit:  limits.PerDay,
 	}
 }
 
@@ -84,7 +110,7 @@ var budgetRegistry = struct {
 // budgetFor returns the shared token budget for one provider credential.
 // Providers are constructed per resolution, but the provider limits apply to
 // the API key, so every instance with the same baseURL+apiKey counts against
-// one budget.
+// one budget. The quotas come from providerTokenLimits for that base URL.
 func budgetFor(baseURL, apiKey string) *TokenBudget {
 	budgetRegistry.Lock()
 	defer budgetRegistry.Unlock()
@@ -93,7 +119,7 @@ func budgetFor(baseURL, apiKey string) *TokenBudget {
 	if b, ok := budgetRegistry.m[key]; ok {
 		return b
 	}
-	b := newTokenBudget()
+	b := newTokenBudget(limitsFor(baseURL))
 	budgetRegistry.m[key] = b
 	return b
 }
@@ -131,20 +157,25 @@ func (b *TokenBudget) windowTotalLocked() int {
 // Reserve blocks until est tokens fit inside both limits, then holds them
 // until Record or Release. est includes completionReserve. A request larger
 // than the minute limit (a big MoM) is admitted only when the window is
-// completely empty, so it gets a quiet minute to itself.
+// completely empty, so it gets a quiet minute to itself. A zero limit
+// disables that gate (provider has no published quota we track).
 func (b *TokenBudget) Reserve(ctx context.Context, est int) (*Reservation, error) {
 	for {
 		b.mu.Lock()
 		now := b.now()
 		b.pruneLocked(now)
 
-		if b.dayTokens+est > b.dayLimit {
+		if b.dayLimit > 0 && b.dayTokens+est > b.dayLimit {
 			b.mu.Unlock()
 			return nil, ErrDailyTokenBudget
 		}
 
-		total := b.windowTotalLocked()
-		if total+est <= b.minLimit || (est > b.minLimit && total == 0) {
+		admitted := b.minLimit <= 0 // no minute quota tracked -> admit freely
+		if !admitted {
+			total := b.windowTotalLocked()
+			admitted = total+est <= b.minLimit || (est > b.minLimit && total == 0)
+		}
+		if admitted {
 			b.nextID++
 			res := &Reservation{id: b.nextID, tokens: est}
 			b.window = append(b.window, budgetEvent{id: res.id, at: now, tokens: est})

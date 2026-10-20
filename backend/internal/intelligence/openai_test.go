@@ -244,6 +244,9 @@ func TestCallLLMRejectsRequestsOverDailyBudget(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	p, _ := newOpenAICompatible("key", srv.URL, "m", "", Glossary{})
+	// The httptest URL is not in providerTokenLimits, so give its budget an
+	// explicit quota to exercise the daily gate.
+	p.budget.dayLimit = 1000
 	p.budget.day = p.budget.dayKey(time.Now())
 	p.budget.dayTokens = p.budget.dayLimit
 

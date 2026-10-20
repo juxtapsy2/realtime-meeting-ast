@@ -10,9 +10,7 @@ import (
 // newTestBudget returns a budget with small limits so tests do not wait out
 // the real 60s window.
 func newTestBudget(minLimit, dayLimit int, windowLen time.Duration) *TokenBudget {
-	b := newTokenBudget()
-	b.minLimit = minLimit
-	b.dayLimit = dayLimit
+	b := newTokenBudget(TokenLimits{PerMinute: minLimit, PerDay: dayLimit})
 	b.windowLen = windowLen
 	b.day = b.dayKey(time.Now())
 	return b
@@ -153,6 +151,38 @@ func TestBudgetForSharesPerCredential(t *testing.T) {
 	other := budgetFor("https://api.groq.com/openai/v1", "key-b")
 	if first == other {
 		t.Error("different API keys must not share a budget")
+	}
+}
+
+// Each provider credential gets the quotas published for its base URL, not
+// one hardcoded provider's limits.
+func TestBudgetForUsesProviderSpecificLimits(t *testing.T) {
+	groq := budgetFor("https://api.groq.com/openai/v1", "limits-test-groq")
+	if groq.minLimit != 8_000 || groq.dayLimit != 200_000 {
+		t.Errorf("groq budget limits = (%d, %d), want (8000, 200000)", groq.minLimit, groq.dayLimit)
+	}
+
+	openai := budgetFor("https://api.openai.com/v1", "limits-test-openai")
+	if openai.minLimit != 1_000_000 || openai.dayLimit != 0 {
+		t.Errorf("openai budget limits = (%d, %d), want (1000000, 0): strictest tier TPM, no published daily quota", openai.minLimit, openai.dayLimit)
+	}
+
+	unknown := budgetFor("https://api.example.com/v1", "limits-test-unknown")
+	if unknown.minLimit != 0 || unknown.dayLimit != 0 {
+		t.Errorf("unknown provider budget limits = (%d, %d), want ungated (0, 0)", unknown.minLimit, unknown.dayLimit)
+	}
+}
+
+// An ungated provider must not wait: requests beyond any single-window size
+// are admitted freely (its own 429 handling is the fallback).
+func TestReserveUngatedProviderAdmitsFreely(t *testing.T) {
+	b := newTokenBudget(TokenLimits{})
+	b.day = b.dayKey(time.Now())
+
+	for i := 0; i < 3; i++ {
+		if _, err := b.Reserve(context.Background(), 100_000); err != nil {
+			t.Fatalf("Reserve() #%d error = %v, want nil for ungated provider", i+1, err)
+		}
 	}
 }
 
