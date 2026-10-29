@@ -46,6 +46,9 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const [documents, setDocuments] = useState<MeetingDocument[]>(meeting.documents || []);
   const [regenerating, setRegenerating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Persistent failure notice: the toast is gone after 6s, but a user who
+  // returns to the tab later must still see why there is no summary.
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,15 +100,18 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const handleMeetingSummary = useCallback((data: MeetingSummary) => {
     setSummary(data);
     setRegenerating(false);
+    setSummaryError(null);
     setToast(null);
   }, []);
 
   // Generation failed server-side: stop the pending state and tell the user
   // why, instead of leaving them waiting on a spinner that will never resolve.
   const handleSummaryFailed = useCallback((data: { message?: string }) => {
+    const message = data?.message || 'Summary generation failed. Please retry.';
     setAutoPending(false);
     setRegenerating(false);
-    setToast(data?.message || 'Summary generation failed. Please retry.');
+    setSummaryError(message);
+    setToast(message);
   }, []);
 
   useEffect(() => {
@@ -124,10 +130,12 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
     setError(null);
+    setSummaryError(null);
     try {
       await regenerateSummary(meeting.id);
     } catch (err) {
       setRegenerating(false);
+      setSummaryError('Failed to start summary generation');
       setError('Failed to start summary generation');
       console.error(err);
     }
@@ -153,6 +161,9 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
       .then((fresh) => {
         if (fresh.summary) {
           setSummary(fresh.summary);
+          // A later retry succeeded while the socket was down; the old
+          // failure banner must not outlive it.
+          setSummaryError(null);
         }
         setDocuments(fresh.documents || []);
       })
@@ -167,7 +178,7 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   });
 
   return (
-    <div className="h-screen flex flex-col bg-shell">
+    <div className="flex-1 min-h-0 flex flex-col bg-shell">
       <header className="bg-canvas border-b border-steel/30 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -241,6 +252,15 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-4">
+            {summaryError && (
+              <div
+                role="alert"
+                className="mb-4 p-3 bg-coral-100 border border-coral-300 rounded-lg text-sm text-coral-700"
+              >
+                <span className="font-semibold">Summary generation failed.</span>{' '}
+                {summaryError}
+              </div>
+            )}
             {summary ? (
               <SummaryPanel summary={summary} meeting={meeting} />
             ) : regenerating || (autoPending && (isLoading || transcript.length > 0)) ? (

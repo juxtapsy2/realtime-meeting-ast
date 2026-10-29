@@ -176,20 +176,20 @@ func (d *DeepgramTranscriber) readResponses() {
 type DeepgramResponse struct {
 	Channel struct {
 		Alternatives []struct {
-			Transcript string `json:"transcript"`
+			Transcript string  `json:"transcript"`
 			Confidence float64 `json:"confidence"`
 			Words      []struct {
-				Word     string  `json:"word"`
-				Start    float64 `json:"start"`
-				End      float64 `json:"end"`
+				Word       string  `json:"word"`
+				Start      float64 `json:"start"`
+				End        float64 `json:"end"`
 				Confidence float64 `json:"confidence"`
 			} `json:"words"`
 		} `json:"alternatives"`
 	} `json:"channel"`
-	IsFinal    bool    `json:"is_final"`
-	SpeechFinal bool   `json:"speech_final"`
-	Duration   float64 `json:"duration"`
-	StartTime  float64 `json:"start"`
+	IsFinal     bool    `json:"is_final"`
+	SpeechFinal bool    `json:"speech_final"`
+	Duration    float64 `json:"duration"`
+	StartTime   float64 `json:"start"`
 }
 
 func (d *DeepgramTranscriber) processResponse(response DeepgramResponse) {

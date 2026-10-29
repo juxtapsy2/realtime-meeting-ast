@@ -35,9 +35,15 @@ func NewGeminiIntelligence(apiKey, model string, glossary Glossary) (*GeminiInte
 	}
 
 	return &GeminiIntelligence{
-		apiKey:   apiKey,
-		model:    model,
-		client:   &http.Client{Timeout: 90 * time.Second},
+		apiKey: apiKey,
+		model:  model,
+		// The chat call is non-streaming: the response headers only arrive
+		// after the full JSON reply is generated, and a large finalization
+		// prompt can take minutes. The previous 90s cap killed those calls
+		// mid-generation ("Client.Timeout exceeded while awaiting headers").
+		// Callers bound the overall operation via context (420s for
+		// finalization), so this only caps a single stuck request.
+		client:   &http.Client{Timeout: 180 * time.Second},
 		glossary: glossary,
 	}, nil
 }
@@ -179,11 +185,14 @@ func (g *GeminiIntelligence) callGemini(ctx context.Context, jsonBody []byte) (s
 		return "", err
 	}
 
-	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
-		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, geminiErrorMessage(body))
-	}
+	// Typed so permanent rejections (401/402/403) stop the retry loops
+	// while 503/429/408 keep the same "Gemini API error (status NNN)" text
+	// that isRetryableGeminiError matches on.
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, geminiErrorMessage(body))
+		return "", &ProviderHTTPError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("Gemini API error (status %d): %s", resp.StatusCode, geminiErrorMessage(body)),
+		}
 	}
 
 	var response struct {

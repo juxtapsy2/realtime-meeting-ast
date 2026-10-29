@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/user/realtime-meeting-ast/backend/internal/auth"
+	"github.com/user/realtime-meeting-ast/backend/internal/intelligence"
 	"github.com/user/realtime-meeting-ast/backend/internal/meetings"
 	"github.com/user/realtime-meeting-ast/backend/internal/providerconfig"
 	"github.com/user/realtime-meeting-ast/backend/internal/sealedbox"
@@ -55,9 +56,11 @@ func platformConfig(store *providerconfig.Store) map[string]any {
 }
 
 // readProviderRequest decodes one update body, which may arrive sealed because
-// it can carry API keys. Every failure is bad client input: an unexpected
-// JSON document, or an envelope that does not decrypt for this server key.
-func readProviderRequest(w http.ResponseWriter, r *http.Request, sealBox *sealedbox.Keypair, body *adminUserProviderRequest) bool {
+// it can carry API keys. dst is the destination for the decoded document (a
+// pointer to the caller's request type). Every failure is bad client input: an
+// unexpected JSON document, or an envelope that does not decrypt for this
+// server key.
+func readProviderRequest(w http.ResponseWriter, r *http.Request, sealBox *sealedbox.Keypair, dst any) bool {
 	// The body is size limited before decoding because a sealed envelope still
 	// arrives as one JSON object, and an oversized one is bad input whether it
 	// is encrypted or not.
@@ -66,7 +69,7 @@ func readProviderRequest(w http.ResponseWriter, r *http.Request, sealBox *sealed
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return false
 	}
-	if err := sealBox.OpenInto(raw, body); err != nil {
+	if err := sealBox.OpenInto(raw, dst); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return false
 	}
@@ -162,6 +165,96 @@ func applyProviderUpdate(w http.ResponseWriter, r *http.Request, store *provider
 		log.Printf("PROVIDERS: failed to record audit for user providers %s: %v", target, err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"email": target, "use_own_keys": useOwn})
+}
+
+// handleProviderModels returns the LLM model IDs available for a provider so
+// the settings UI can offer a picker instead of free-typing model names.
+//
+// The body is sealed like every provider write because it may carry a freshly
+// typed API key. With no key in the body the target's stored (or platform)
+// key is used, so a user with a saved key just picks a model. selfOnly
+// selects the identity rule: the self-service route always acts on the
+// session identity, the admin route on the body's email (superadmin-gated by
+// its middleware).
+func handleProviderModels(store *providerconfig.Store, sealBox *sealedbox.Keypair, selfOnly bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		target := ""
+		if selfOnly {
+			target = auth.NormalizeEmail(meetings.OwnerEmailFromContext(r.Context()))
+			if !strings.Contains(target, "@") {
+				http.Error(w, "Sign in to manage your provider settings", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			acting, _ := r.Context().Value(adminEmailCtxKey{}).(string)
+			target = auth.NormalizeEmail(acting)
+			if !strings.Contains(target, "@") {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		var body adminUserProviderRequest
+		if !readProviderRequest(w, r, sealBox, &body) {
+			return
+		}
+		if !selfOnly {
+			target = auth.NormalizeEmail(body.Email)
+			if !strings.Contains(target, "@") {
+				http.Error(w, "A valid email is required", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// A typed key wins (preview before saving); otherwise fall back to
+		// the target's resolved configuration, which already merges own-key
+		// and platform fallback per field. Provider names are validated
+		// lower-case, so a typed "Gemini" is accepted as "gemini".
+		providerName := strings.ToLower(strings.TrimSpace(body.LLMProvider))
+		apiKey := strings.TrimSpace(body.LLMAPIKey)
+		if providerName == "" || apiKey == "" {
+			sel, err := store.For(r.Context(), target)
+			if err != nil {
+				log.Printf("PROVIDERS: model list failed to resolve configuration for %s: %v", target, err)
+				http.Error(w, "Failed to resolve provider configuration", http.StatusInternalServerError)
+				return
+			}
+			if providerName == "" {
+				providerName = sel.LLMProvider
+			}
+			if apiKey == "" {
+				apiKey = sel.LLMAPIKey
+			}
+		}
+
+		switch intelligence.Provider(providerName) {
+		case intelligence.ProviderOpenAI, intelligence.ProviderGroq, intelligence.ProviderGemini:
+		default:
+			// Surface this as client input, not an upstream failure: the
+			// picker only makes sense for providers we can query.
+			http.Error(w, `Unsupported LLM provider "`+providerName+`" — supported: openai, groq, gemini`, http.StatusBadRequest)
+			return
+		}
+		if apiKey == "" {
+			http.Error(w, "No API key available for this provider — type a key first", http.StatusBadRequest)
+			return
+		}
+
+		models, err := intelligence.ListModels(r.Context(), intelligence.Provider(providerName), apiKey)
+		if err != nil {
+			// The upstream status/code is safe to surface; details stay in
+			// the log and the key never appears in either.
+			log.Printf("PROVIDERS: %s: model list for provider %q failed: %v", target, providerName, err)
+			http.Error(w, "Failed to list models from the provider: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	}
 }
 
 // handleSelfProvider serves the signed-in user's own provider configuration.

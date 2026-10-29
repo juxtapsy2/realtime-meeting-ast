@@ -4,13 +4,14 @@ import {
   AdminMonitor,
   AuditEntry,
   fetchAdminMonitor,
+  fetchUserLLMModels,
   removeAdmin,
   resetUserProvider,
   saveUserProvider,
   updateAdminSettings,
   UserProviderUpdate,
 } from "../../api/admin";
-import { resetOwnProvider, saveOwnProvider } from "../../api/provider";
+import { fetchOwnLLMModels, resetOwnProvider, saveOwnProvider } from "../../api/provider";
 import { EmailTagInput } from "./EmailTagInput";
 import { UserProviderRow } from "../providers/UserProviderRow";
 
@@ -177,6 +178,15 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
     }, `Reset ${email} to platform provider defaults.`);
   }
 
+  // Mirrors the save path: an admin's own row uses the self-service endpoint
+  // (the admin model route is superadmin-gated), other rows the admin one.
+  async function handleFetchModels(email: string, provider: string, typedKey: string) {
+    if (isOwnRow(email)) {
+      return fetchOwnLLMModels(provider, typedKey || undefined);
+    }
+    return fetchUserLLMModels(email, provider, typedKey || undefined);
+  }
+
   // The only runtime setting still editable here is the access list, which has
   // its own editor below. Provider and model are per user, in the table above.
   const allowedSetting = monitor?.settings.find(
@@ -192,7 +202,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
   }
 
   return (
-    <div className="h-screen flex flex-col max-w-5xl mx-auto p-6">
+    <div className="flex-1 min-h-0 overflow-y-auto flex flex-col max-w-7xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-ink">Admin</h1>
@@ -345,6 +355,7 @@ export function AdminPage({ onBack, isSuperAdmin }: AdminPageProps) {
                   busy={busy}
                   onSave={handleSaveUser}
                   onReset={handleResetUser}
+                  onFetchModels={handleFetchModels}
                 />
               ))}
             </tbody>

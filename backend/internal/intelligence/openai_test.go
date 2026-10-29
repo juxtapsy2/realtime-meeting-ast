@@ -364,3 +364,25 @@ func TestFinalizeMeetingSplitsWhenRequestTooLarge(t *testing.T) {
 		t.Errorf("last call schema = %q, want mom_summary (merge)", last)
 	}
 }
+
+func TestCallLLMSurfacesPermanentHTTPError(t *testing.T) {
+	body := `{"error":{"message":"Your prepayment credits are depleted.","type":"insufficient_credit","code":"billing_error"}}`
+	srv, _ := stubServer(t, http.StatusPaymentRequired, nil, body)
+	p, _ := newOpenAICompatible("key", srv.URL, "m", "", Glossary{})
+
+	_, err := p.callLLM(t.Context(), "hi", nil)
+	var provErr *ProviderHTTPError
+	if !errors.As(err, &provErr) {
+		t.Fatalf("want ProviderHTTPError, got %v", err)
+	}
+	if provErr.StatusCode != http.StatusPaymentRequired || !provErr.Permanent() {
+		t.Errorf("StatusCode = %d, Permanent() = %v; want 402/true", provErr.StatusCode, provErr.Permanent())
+	}
+	if !strings.Contains(provErr.Message, "prepayment credits") {
+		t.Errorf("Message = %q, want provider detail preserved", provErr.Message)
+	}
+	// Rejected requests are not billed: the minute reservation must be back.
+	if got := p.budget.windowTotalLocked(); got != 0 {
+		t.Errorf("budget window = %d after rejection, want 0 released", got)
+	}
+}

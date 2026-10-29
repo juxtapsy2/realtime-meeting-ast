@@ -135,6 +135,31 @@ export async function resetUserProvider(email: string): Promise<void> {
   }
 }
 
+// Model picker support for one user's row: lists the model IDs the provider
+// offers for the typed key, or for the user's stored key when none is typed.
+// Sealed because the body can carry a freshly typed API key.
+export async function fetchUserLLMModels(
+  email: string,
+  provider: string,
+  typedKey?: string,
+): Promise<string[]> {
+  const body: { email: string; llm_provider: string; llm_api_key?: string } = {
+    email,
+    llm_provider: provider,
+  };
+  if (typedKey) body.llm_api_key = typedKey;
+  const response = await fetch(`${API_BASE}/admin/users/provider/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: await sealJSON(body),
+  });
+  if (!response.ok) {
+    throw await readError(response, 'Failed to fetch models');
+  }
+  const data = (await response.json()) as { models: string[] };
+  return data.models;
+}
+
 export async function fetchAdmins(): Promise<AdminList> {
   const response = await fetch(`${API_BASE}/admin/admins`);
   if (!response.ok) {

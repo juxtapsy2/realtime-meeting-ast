@@ -991,6 +991,25 @@ Every user manages their own STT and LLM providers, model, and API keys through
 session, never from the request body or URL, so the endpoint has no identifier a
 caller could swap to edit somebody else; an email in the body is decoded and
 ignored. The body may be sealed like the admin update, since it can carry keys.
+`POST /api/user/provider/models` (and the superadmin-gated
+`POST /api/admin/users/provider/models`) lists the model IDs a provider offers
+for a key — typed or stored — so the settings UI offers a model picker instead
+of free-typed model names, which otherwise fail only at call time as provider
+400s.
+
+Saved combos let one user switch between several STT/LLM setups without
+retyping anything: `GET/POST/DELETE /api/user/provider/combos` list, snapshot
+("save the current saved configuration as…", refused without at least one
+stored key), and delete named combos, and `POST /api/user/provider/combos/apply`
+switches the user's own provider row to one by copying its stored ciphertexts
+verbatim — keys are neither returned nor accepted over the wire. There is no
+active-combo pointer column: the active state is derived by comparing the
+current settings row against the saved combos, reading `system` while riding
+the platform defaults, `custom` when own keys match no combo, and the combo
+name otherwise, so manual edits and deletes cannot leave it stale. Applying a
+combo is audited like any other provider write; switching back to the system
+default remains `PUT /api/user/provider` with `use_own_keys: false`, which
+keeps the stored keys.
 
 The superadmin is configured only through the `SUPERADMIN_EMAIL` environment
 variable and is implicitly allowlisted, so the account able to repair the

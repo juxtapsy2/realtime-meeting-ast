@@ -191,7 +191,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   };
 
   return (
-    <div className="h-screen flex flex-col bg-shell">
+    <div className="flex-1 min-h-0 flex flex-col bg-shell">
       {/* Header */}
       <header className="bg-canvas border-b border-steel/30 px-6 py-4">
         <div className="flex items-center justify-between">

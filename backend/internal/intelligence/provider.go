@@ -38,6 +38,34 @@ func (e *RequestTooLargeError) Error() string {
 	return fmt.Sprintf("LLM request too large (requested %d tokens, limit %d)", e.Requested, e.Limit)
 }
 
+// ProviderHTTPError reports a non-success HTTP response from an LLM API.
+// StatusCode lets callers classify the failure without string matching the
+// provider payload. Message is kept for logs, never for end users.
+type ProviderHTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *ProviderHTTPError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("LLM API error (status %d)", e.StatusCode)
+}
+
+// Permanent reports whether retrying the identical request can succeed.
+// Auth rejections (401/403) and depleted billing (402) persist until the
+// user changes configuration, so retry loops must stop immediately instead
+// of burning the backoff schedule.
+func (e *ProviderHTTPError) Permanent() bool {
+	switch e.StatusCode {
+	case 401, 402, 403:
+		return true
+	default:
+		return false
+	}
+}
+
 // IntelligenceProvider is the interface for AI analysis providers
 type IntelligenceProvider interface {
 	// AnalyzeChunk analyzes a chunk of transcript and returns meeting state updates

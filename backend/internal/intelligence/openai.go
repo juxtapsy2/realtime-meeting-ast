@@ -283,6 +283,18 @@ func (o *OpenAIIntelligence) callLLM(ctx context.Context, prompt string, respons
 		o.budget.Release(res)
 	}
 
+	// Permanent rejections (bad key, depleted billing, forbidden) cannot
+	// succeed on retry; surface them typed so retry loops fail fast with
+	// a message that says configuration must change.
+	switch resp.StatusCode {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		msg := apiErr.Error.Message
+		if msg == "" {
+			msg = fmt.Sprintf("LLM API error (status %s)", resp.Status)
+		}
+		return "", &ProviderHTTPError{StatusCode: resp.StatusCode, Message: msg}
+	}
+
 	var response struct {
 		Choices []struct {
 			Message struct {

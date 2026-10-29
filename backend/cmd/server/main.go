@@ -207,6 +207,16 @@ func main() {
 	// providers, model, and keys. The identity is taken from the session, so
 	// the route cannot be aimed at anyone else.
 	mux.HandleFunc("/api/user/provider", handleSelfProvider(providerStore, settingsStore, authenticator, sealBox))
+	// Saved STT/LLM combos: named configurations a user switches between
+	// without retyping providers, models, and keys. Applying one rewrites the
+	// user's own provider row (audited like a manual save); the system
+	// default remains PUT /api/user/provider with use_own_keys=false.
+	mux.HandleFunc("/api/user/provider/combos", handleSelfProviderCombos(providerStore, sealBox))
+	mux.HandleFunc("/api/user/provider/combos/apply", handleSelfProviderComboApply(providerStore, settingsStore, authenticator, sealBox))
+	// Model picker support: query the configured provider for the model IDs
+	// an API key can use, so users select instead of typing model names.
+	mux.HandleFunc("/api/user/provider/models", handleProviderModels(providerStore, sealBox, true))
+	mux.HandleFunc("/api/admin/users/provider/models", adminAuth(authenticator, superAdminOnly(authenticator, handleProviderModels(providerStore, sealBox, false))))
 
 	mux.HandleFunc("/ws/meeting/", handleWebSocket(hub, meetingService, providerStore, buildSTTVocabulary(glossary)))
 

@@ -1,9 +1,23 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { fetchCurrentUser, logout } from '../../api/auth';
 
 type AuthState = 'loading' | 'authed' | 'denied';
 
 const GOOGLE_START_URL = '/api/auth/google/start';
+
+// The signed-in identity and the logout action, for views that render user
+// actions (App places them in the top navbar). Provided only in the authed
+// state, which is the only state in which children render at all.
+type AuthContextValue = { email: string; logout: () => Promise<void> };
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function useAuth(): AuthContextValue {
+  const value = useContext(AuthContext);
+  if (!value) {
+    throw new Error('useAuth must be used inside AuthGate');
+  }
+  return value;
+}
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>('loading');
@@ -74,19 +88,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <>
-      {currentUser && (
-        <div className="fixed top-3 right-3 z-50 flex items-center gap-3 text-xs">
-          <span className="text-muted">{currentUser}</span>
-          <button
-            onClick={handleLogout}
-            className="px-2.5 py-1 rounded-lg border border-steel/50 text-ink hover:bg-canvas transition-colors"
-          >
-            Sign out
-          </button>
-        </div>
-      )}
+    <AuthContext.Provider value={{ email: currentUser ?? '', logout: handleLogout }}>
       {children}
-    </>
+    </AuthContext.Provider>
   );
 }

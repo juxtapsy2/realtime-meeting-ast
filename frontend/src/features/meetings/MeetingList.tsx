@@ -160,7 +160,7 @@ export function MeetingList({ onSelectMeeting }: MeetingListProps) {
   }
 
   return (
-    <div className="h-screen flex flex-col max-w-4xl mx-auto px-6 pb-6 pt-4">
+    <div className="flex-1 min-h-0 flex flex-col max-w-7xl mx-auto w-full px-6 pb-6 pt-4">
       <div className="mb-4">
         <h1 className="text-2xl font-bold tracking-tight text-ink mb-4">Meetings</h1>
 

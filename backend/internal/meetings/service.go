@@ -307,6 +307,14 @@ func (s *Service) generateSummaryWithRetry(ctx context.Context, p intelligence.I
 			log.Printf("Meeting %d: LLM request too large even after chunking, not retrying: %v", meetingID, err)
 			break
 		}
+		var provErr *intelligence.ProviderHTTPError
+		if errors.As(err, &provErr) && provErr.Permanent() {
+			// Billing/auth rejections (402 depleted credits, 401/403 bad
+			// key) only change when the user fixes configuration; the
+			// backoff schedule would just delay an inevitable failure.
+			log.Printf("Meeting %d: provider rejected the request permanently (status %d), not retrying: %v", meetingID, provErr.StatusCode, err)
+			break
+		}
 		if attempt == maxAttempts {
 			break
 		}
@@ -362,6 +370,17 @@ func summaryFailureMessage(err error) string {
 			return fmt.Sprintf("AI rate limit reached (8K tokens/minute). Try again in about %d seconds.", secs)
 		}
 		return "AI rate limit reached (8K tokens/minute). Wait about a minute, then retry."
+	}
+	var provErr *intelligence.ProviderHTTPError
+	if errors.As(err, &provErr) {
+		// The provider's raw message stays out of the UI; say what the user
+		// can actually do about it.
+		switch provErr.StatusCode {
+		case 401, 403:
+			return "The AI provider rejected the API key (unauthorized). Update the key in provider settings, then retry."
+		case 402:
+			return "The AI provider has no credit left (billing exhausted). Top up the provider account or switch providers in settings, then retry."
+		}
 	}
 	return "Summary generation failed. Please retry."
 }

@@ -14,12 +14,16 @@ export function UserProviderRow({
   busy,
   onSave,
   onReset,
+  onFetchModels,
 }: {
   user: UserProviderSummary;
   canEdit: boolean;
   busy: boolean;
   onSave: (email: string, patch: UserProviderUpdate) => void;
   onReset: (email: string) => void;
+  // Loads the provider's available model IDs for this row (typed key wins,
+  // stored key otherwise). The caller binds the self or admin endpoint.
+  onFetchModels: (email: string, provider: string, typedKey: string) => Promise<string[]>;
 }) {
   const [useOwn, setUseOwn] = useState(user.use_own_keys);
   const [sttProvider, setSttProvider] = useState(user.stt_provider);
@@ -27,6 +31,9 @@ export function UserProviderRow({
   const [llmProvider, setLlmProvider] = useState(user.llm_provider);
   const [llmModel, setLlmModel] = useState(user.llm_model);
   const [llmKey, setLlmKey] = useState('');
+  const [llmModels, setLlmModels] = useState<string[] | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
 
   useEffect(() => {
     setUseOwn(user.use_own_keys);
@@ -35,7 +42,36 @@ export function UserProviderRow({
     setLlmModel(user.llm_model);
     setSttKey('');
     setLlmKey('');
+    setLlmModels(null);
+    setModelsError(null);
   }, [user]);
+
+  // A loaded list belongs to one provider; switching providers invalidates it.
+  useEffect(() => {
+    setLlmModels(null);
+    setModelsError(null);
+  }, [llmProvider]);
+
+  async function handleLoadModels() {
+    const provider = llmProvider.trim();
+    if (!provider) {
+      setModelsError('Set the LLM provider first');
+      return;
+    }
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const models = await onFetchModels(user.email, provider, llmKey.trim());
+      setLlmModels(models);
+      if (models.length === 0) {
+        setModelsError('Provider returned no models for this key');
+      }
+    } catch (err) {
+      setModelsError(err instanceof Error ? err.message : 'Failed to fetch models');
+    } finally {
+      setModelsLoading(false);
+    }
+  }
 
   function handleSave() {
     const patch: UserProviderUpdate = { email: user.email, use_own_keys: useOwn };
@@ -105,14 +141,6 @@ export function UserProviderRow({
             className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
           <input
-            type="text"
-            value={llmModel}
-            disabled={!canEdit}
-            onChange={(e) => setLlmModel(e.target.value)}
-            placeholder="llm model"
-            className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
-          />
-          <input
             type="password"
             value={llmKey}
             disabled={!canEdit}
@@ -120,6 +148,45 @@ export function UserProviderRow({
             placeholder={user.llm_key_set ? '•••••••• (stored)' : 'no LLM key'}
             className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink placeholder:text-steel focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
           />
+          <div className="flex items-center gap-2 text-[10px]">
+            <button
+              type="button"
+              onClick={handleLoadModels}
+              disabled={!canEdit || modelsLoading}
+              className="text-brand-700 hover:underline disabled:opacity-50"
+            >
+              {modelsLoading ? 'loading models…' : llmModels !== null ? 'reload models' : 'load models'}
+            </button>
+          </div>
+          {modelsError && <div className="text-[10px] text-coral-600">{modelsError}</div>}
+          {/* Sits below the API key and the load action: read-only label
+              until the list loads, then a dropdown so the model can be
+              chosen. */}
+          {llmModels !== null && llmModels.length > 0 ? (
+            <select
+              value={llmModel}
+              disabled={!canEdit}
+              onChange={(e) => setLlmModel(e.target.value)}
+              className="w-full px-2 py-1 text-xs border border-steel/50 rounded-lg bg-canvas text-ink focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-wash disabled:text-muted"
+            >
+              {/* Nothing configured -> provider default; a stale/typed value
+                  stays selectable even if absent from the fresh list. */}
+              {!llmModel && <option value="">(provider default)</option>}
+              {llmModel && !llmModels.includes(llmModel) && (
+                <option value={llmModel}>{llmModel} (current)</option>
+              )}
+              {llmModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="px-2 py-1 text-xs text-ink border border-steel/30 rounded-lg bg-wash">
+              <span className="text-muted">model: </span>
+              {llmModel || 'provider default'}
+            </div>
+          )}
         </div>
       </td>
       <td className="px-4 py-3">
