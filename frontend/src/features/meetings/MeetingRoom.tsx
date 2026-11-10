@@ -190,6 +190,17 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     }
   };
 
+  // Backing out of a room that is actively recording pauses it server-side
+  // first: otherwise it stays "active" with no audio feed and silently drops
+  // whatever is said while the user is on the meeting list. Re-entering shows
+  // Paused + Resume, which restarts the mic.
+  const handleBack = () => {
+    if (isMeetingActive && !isPaused) {
+      handlePauseMeeting();
+    }
+    onBack();
+  };
+
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-shell">
       {/* Header */}
@@ -197,7 +208,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
-              onClick={onBack}
+              onClick={handleBack}
               className="text-muted hover:text-ink transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

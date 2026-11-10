@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 
 interface UseMicrophoneOptions {
   onAudioData?: (data: ArrayBuffer) => void;
@@ -184,6 +184,14 @@ export function useMicrophone({
     stopInternal();
     setIsActive(false);
     setSource(null);
+  }, [stopInternal]);
+
+  // Unmount must release the capture: without this, backing out of a room
+  // leaves the hardware mic open (browser recording indicator stays on) with
+  // the audio going nowhere. stopInternal is stable, so this only ever runs
+  // on unmount, never mid-recording.
+  useEffect(() => {
+    return () => stopInternal();
   }, [stopInternal]);
 
   const getStream = useCallback(() => {
