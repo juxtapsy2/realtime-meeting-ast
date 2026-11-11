@@ -912,10 +912,21 @@ issue.updated
 question.created
 question.resolved
 
+recording.locked
+recording.unlocked
+
 context.related
 ```
 
 Events should contain enough identity information to apply incremental frontend updates.
+
+Only one WebSocket connection per meeting may feed audio. A client claims the
+recording token with the `claim_audio` command before starting capture; the
+server drops audio from any other connection and notifies the previous holder
+with `recording.locked` (and the claimant with `recording.unlocked`). Ownership
+is released on disconnect and is never inherited automatically, so a second tab
+opened on the same meeting can watch the live transcript but cannot record
+duplicate speech.
 
 ---
 
