@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -243,7 +244,7 @@ func (s *Service) EndMeeting(id int) error {
 	s.broadcaster.BroadcastToMeeting(id, "meeting.ended", meeting)
 
 	if p := s.intelProviderFor(id, meeting.OwnerEmail); p != nil {
-		s.finalizeMeetingAsync(p, id)
+		s.finalizeMeetingAsync(p, id, "en")
 	}
 
 	return nil
@@ -385,10 +386,32 @@ func summaryFailureMessage(err error) string {
 	return "Summary generation failed. Please retry."
 }
 
+// normalizeSummaryLanguage maps a client-supplied MoM language to the
+// supported set: "en" (default) or "vi". An unsupported value is an error so
+// the transport can reject it instead of silently generating the wrong
+// language.
+func normalizeSummaryLanguage(language string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "", "en":
+		return "en", nil
+	case "vi":
+		return "vi", nil
+	default:
+		return "", fmt.Errorf(`language must be "en" or "vi"`)
+	}
+}
+
 // finalizeMeetingAsync generates and persists the meeting summary in the
 // background so transcription/client flow is not blocked. The provider is
 // passed explicitly so a concurrent provider swap cannot nil the call.
-func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meetingID int) {
+// language is the MoM output language ("en" or "vi").
+func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meetingID int, language string) {
+	language, err := normalizeSummaryLanguage(language)
+	if err != nil {
+		// Only reachable from a code path that passed a bad literal; fall
+		// back to the default rather than silently dropping the summary.
+		language = "en"
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -436,6 +459,7 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 			DocumentText:   docText,
 			FinalState:     &intelligence.MeetingState{},
 			Glossary:       s.glossary,
+			Language:       language,
 		}
 		if meeting != nil {
 			input.Title = meeting.Title
@@ -451,6 +475,9 @@ func (s *Service) finalizeMeetingAsync(p intelligence.IntelligenceProvider, meet
 			})
 			return
 		}
+		// Stamp the language server-side; the model's output is never
+		// trusted for it (and the schema does not even ask for it).
+		summary.Language = language
 
 		data, err := json.Marshal(summary)
 		if err != nil {
@@ -523,8 +550,9 @@ func (s *Service) GetMeetingByID(id int) (*types.MeetingInfo, error) {
 }
 
 // RegenerateSummary triggers background summary generation for a completed
-// meeting that has no summary yet (e.g. a previous generation attempt failed).
-// It is intentionally a no-go when a summary already exists.
+// meeting in the requested language (optional body {"language":"en"|"vi"},
+// default English). An existing summary is overwritten: regenerating in the
+// other language is an explicit user action.
 func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
 	id, err := extractIDFromPath(r.URL.Path)
 	if err != nil {
@@ -538,8 +566,16 @@ func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if meeting.Summary != nil {
-		http.Error(w, "Meeting already has a summary", http.StatusConflict)
+	var req struct {
+		Language string `json:"language"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	lang, err := normalizeSummaryLanguage(req.Language)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -559,7 +595,7 @@ func (s *Service) RegenerateSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.finalizeMeetingAsync(p, id)
+	s.finalizeMeetingAsync(p, id, lang)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

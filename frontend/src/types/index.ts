@@ -22,6 +22,9 @@ export interface MeetingDocument {
 export interface MeetingSummary {
   title?: string;
   summary: string;
+  // MoM output language the summary was generated in; omitted on summaries
+  // produced before language support (treated as English).
+  language?: 'en' | 'vi';
   mom_entries?: Array<{ id: string; title: string; status: string; actions?: string; assignee?: string; eta?: string }>;
   key_points?: string[];
   decisions?: Array<{ id: string; title: string; description?: string; status: string; confidence: number }>;

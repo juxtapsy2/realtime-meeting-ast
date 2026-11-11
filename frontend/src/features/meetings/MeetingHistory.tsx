@@ -6,6 +6,7 @@ import {
   regenerateSummary,
   uploadMeetingDocuments,
   clearMeetingDocuments,
+  MomLanguage,
 } from '../../api/meetings';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { TranscriptPanel } from '../transcript/TranscriptPanel';
@@ -45,6 +46,9 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
   const [autoPending, setAutoPending] = useState<boolean>(autoPendingOnOpen(meeting));
   const [documents, setDocuments] = useState<MeetingDocument[]>(meeting.documents || []);
   const [regenerating, setRegenerating] = useState(false);
+  // MoM output language for the next generation. English is the default;
+  // it follows the current summary once one arrives.
+  const [momLanguage, setMomLanguage] = useState<MomLanguage>('en');
   const [toast, setToast] = useState<string | null>(null);
   // Persistent failure notice: the toast is gone after 6s, but a user who
   // returns to the tab later must still see why there is no summary.
@@ -95,6 +99,14 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     };
   }, [meeting.id]);
 
+  // Keep the selector in step with the language the current summary was
+  // generated in (older summaries have no language and count as English).
+  useEffect(() => {
+    if (summary?.language) {
+      setMomLanguage(summary.language);
+    }
+  }, [summary]);
+
   // If the summary is still being generated for this completed meeting,
   // receive it live over the WebSocket listener instead of polling REST.
   const handleMeetingSummary = useCallback((data: MeetingSummary) => {
@@ -132,14 +144,14 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
     setError(null);
     setSummaryError(null);
     try {
-      await regenerateSummary(meeting.id);
+      await regenerateSummary(meeting.id, momLanguage);
     } catch (err) {
       setRegenerating(false);
       setSummaryError('Failed to start summary generation');
       setError('Failed to start summary generation');
       console.error(err);
     }
-  }, [meeting.id]);
+  }, [meeting.id, momLanguage]);
 
   const handleUploadDocuments = useCallback(
     async (files: File[]) => {
@@ -261,14 +273,30 @@ export function MeetingHistory({ meeting, onBack }: MeetingHistoryProps) {
                 {summaryError}
               </div>
             )}
-            {summary ? (
-              <SummaryPanel summary={summary} meeting={meeting} />
-            ) : regenerating || (autoPending && (isLoading || transcript.length > 0)) ? (
+            {regenerating ? (
+              <SummaryPending />
+            ) : summary ? (
+              <>
+                <div className="mb-4 flex items-center justify-end gap-2">
+                  <span className="text-xs text-muted">Regenerate in</span>
+                  <LanguageSelect value={momLanguage} onChange={setMomLanguage} />
+                  <button
+                    onClick={handleRegenerate}
+                    className="px-3 py-1.5 text-sm border border-steel/50 text-ink rounded-lg hover:bg-wash transition-colors"
+                  >
+                    Regenerate
+                  </button>
+                </div>
+                <SummaryPanel summary={summary} meeting={meeting} />
+              </>
+            ) : autoPending && (isLoading || transcript.length > 0) ? (
               <SummaryPending />
             ) : (
               <SummaryMissing
                 onGenerate={handleRegenerate}
                 canGenerate={transcript.length > 0 || documents.length > 0}
+                language={momLanguage}
+                onLanguageChange={setMomLanguage}
               />
             )}
           </div>
@@ -425,7 +453,39 @@ function SummaryPending() {
   );
 }
 
-function SummaryMissing({ onGenerate, canGenerate }: { onGenerate: () => void; canGenerate: boolean }) {
+// Language picker for the next MoM generation: English (default) or
+// Vietnamese. Shared by the missing-summary and existing-summary toolbars.
+function LanguageSelect({
+  value,
+  onChange,
+}: {
+  value: MomLanguage;
+  onChange: (language: MomLanguage) => void;
+}) {
+  return (
+    <select
+      aria-label="MoM language"
+      value={value}
+      onChange={(e) => onChange(e.target.value as MomLanguage)}
+      className="px-2 py-1.5 text-sm border border-steel/50 rounded-lg bg-canvas text-ink focus:outline-none focus:ring-2 focus:ring-brand-500"
+    >
+      <option value="en">English</option>
+      <option value="vi">Tiếng Việt</option>
+    </select>
+  );
+}
+
+function SummaryMissing({
+  onGenerate,
+  canGenerate,
+  language,
+  onLanguageChange,
+}: {
+  onGenerate: () => void;
+  canGenerate: boolean;
+  language: MomLanguage;
+  onLanguageChange: (language: MomLanguage) => void;
+}) {
   return (
     <div className="py-8 text-center">
       <p className="text-ink text-sm">No summary was generated for this meeting.</p>
@@ -434,13 +494,16 @@ function SummaryMissing({ onGenerate, canGenerate }: { onGenerate: () => void; c
           ? 'The transcript or uploaded documents are preserved; you can generate the summary now.'
           : 'Upload meeting documents or use a transcript to have evidence to summarize.'}
       </p>
-      <button
-        onClick={onGenerate}
-        disabled={!canGenerate}
-        className="mt-4 px-4 py-2 bg-brand-500 text-ink text-sm font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-canvas disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Generate Summary
-      </button>
+      <div className="mt-4 flex items-center justify-center gap-2">
+        <LanguageSelect value={language} onChange={onLanguageChange} />
+        <button
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className="px-4 py-2 bg-brand-500 text-ink text-sm font-semibold rounded-lg hover:bg-brand-600 hover:text-canvas transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-canvas disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Generate Summary
+        </button>
+      </div>
     </div>
   );
 }
