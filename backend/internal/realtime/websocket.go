@@ -294,6 +294,11 @@ func (c *Client) handleCommand(cmd CommandMessage, meetingSvc MeetingService, tr
 			log.Printf("Error resuming meeting: %v", err)
 		}
 		c.Hub.SetMeetingPaused(cmd.MeetingID, false)
+	case "claim_audio":
+		// Explicitly take (or retake) the meeting's recording token before
+		// this connection starts sending audio. Uses c.MeetingID, not a
+		// client-supplied one.
+		c.Hub.ClaimAudio(c.MeetingID, c)
 	default:
 		log.Printf("Unknown command: %s", cmd.Type)
 	}
@@ -312,9 +317,11 @@ func dropSTTConnection(transcriber transcription.Transcriber) {
 }
 
 // audioEnabled reports whether audio from a client should be forwarded to the
-// transcriber. Audio is dropped while the meeting is paused.
+// transcriber. Audio is dropped while the meeting is paused, and only the
+// connection holding the meeting's recording token may feed it — so two tabs
+// on the same meeting can never transcribe duplicate speech.
 func (c *Client) audioEnabled(meetingID int) bool {
-	return !c.Hub.IsMeetingPaused(meetingID)
+	return !c.Hub.IsMeetingPaused(meetingID) && c.Hub.IsAudioOwner(meetingID, c)
 }
 
 func extractMeetingID(path string) (int, error) {

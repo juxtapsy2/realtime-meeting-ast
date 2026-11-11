@@ -27,6 +27,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     meeting.status === 'active' || meeting.status === 'paused'
   );
   const [isPaused, setIsPaused] = useState(meeting.status === 'paused');
+  // True when another connection holds the meeting's recording token: audio
+  // from this tab is dropped server-side, so the mic must stay off.
+  const [recordingLocked, setRecordingLocked] = useState(false);
   const lastSourceRef = useRef<AudioSource | null>(null);
 
   const handleTranscriptPartial = useCallback((event: TranscriptEvent) => {
@@ -50,6 +53,22 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   const stopMicRef = useRef<() => void>(() => {});
   const stopMicRefSetter = useCallback((cb: () => void) => {
     stopMicRef.current = cb;
+  }, []);
+  // Refs break the declaration cycle: handleReconnected (passed into
+  // useWebSocket) needs to know the mic state and re-claim audio, but both
+  // hooks are declared later.
+  const micActiveRef = useRef(false);
+  const claimAudioRef = useRef<() => void>(() => {});
+
+  const handleRecordingLocked = useCallback(() => {
+    // Another connection claimed the recording token: stop capturing here so
+    // the UI never shows an active mic whose audio the server is dropping.
+    setRecordingLocked(true);
+    stopMicRef.current();
+  }, []);
+
+  const handleRecordingUnlocked = useCallback(() => {
+    setRecordingLocked(false);
   }, []);
 
   const handleMeetingEnded = useCallback(() => {
@@ -104,6 +123,12 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   }, [backfillTranscript]);
 
   const handleReconnected = useCallback(() => {
+    // A reconnect opens a new server-side connection, which does not hold the
+    // recording token yet — reclaim it only when this tab was capturing, so
+    // an idle tab can never steal the recording from a live one.
+    if (micActiveRef.current) {
+      claimAudioRef.current();
+    }
     // Refetch finals missed while the socket was down.
     backfillTranscript();
     // The meeting may have been ended/paused remotely during the gap, in
@@ -131,6 +156,8 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
     onMeetingPaused: () => setIsPaused(true),
     onMeetingResumed: () => setIsPaused(false),
     onStateUpdate: handleStateUpdate,
+    onRecordingLocked: handleRecordingLocked,
+    onRecordingUnlocked: handleRecordingUnlocked,
     onReconnected: handleReconnected,
   });
 
@@ -145,6 +172,14 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
   useEffect(() => {
     stopMicRefSetter(stopMic);
   }, [stopMic, stopMicRefSetter]);
+
+  useEffect(() => {
+    claimAudioRef.current = () => sendCommand('claim_audio');
+  }, [sendCommand]);
+
+  useEffect(() => {
+    micActiveRef.current = isMicActive;
+  }, [isMicActive]);
 
   const handleStartMeeting = () => {
     sendCommand('start_meeting', { meeting_id: meeting.id });
@@ -165,6 +200,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
 
   const handleResumeMeeting = () => {
     setIsPaused(false);
+    // Claim before resuming so the audio that follows flows under this
+    // tab's recording token.
+    sendCommand('claim_audio');
     sendCommand('resume_meeting', { meeting_id: meeting.id });
     const lastSource = lastSourceRef.current || 'microphone';
     if (!isMicActive) {
@@ -177,6 +215,9 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
       stopMic();
     } else {
       lastSourceRef.current = 'microphone';
+      // Take the recording token before any audio flows: the server drops
+      // audio from connections that do not hold it.
+      sendCommand('claim_audio');
       await startMic('microphone');
     }
   };
@@ -186,6 +227,7 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
       stopMic();
     } else {
       lastSourceRef.current = 'system';
+      sendCommand('claim_audio');
       await startMic('system');
     }
   };
@@ -315,6 +357,13 @@ export function MeetingRoom({ meeting, onBack, onMeetingEnded }: MeetingRoomProp
       {isMeetingActive && isReconnecting && (
         <div role="alert" className="bg-coral-100 border-b border-coral-300 px-6 py-2 text-sm text-coral-700">
           Connection lost — reconnecting… Audio is not being recorded right now.
+        </div>
+      )}
+
+      {recordingLocked && (
+        <div role="alert" className="bg-steel/25 border-b border-steel/30 px-6 py-2 text-sm text-ink">
+          Another tab is recording this meeting — audio from here is not being recorded. Click Use
+          Mic to take recording back.
         </div>
       )}
 

@@ -12,6 +12,8 @@ interface UseWebSocketOptions {
   onStateUpdate?: (state: Partial<MeetingState>) => void;
   onMeetingSummary?: (data: any) => void;
   onMeetingSummaryFailed?: (data: { message?: string }) => void;
+  onRecordingLocked?: () => void;
+  onRecordingUnlocked?: () => void;
   onReconnected?: () => void;
   onError?: (error: Event) => void;
 }
@@ -27,6 +29,8 @@ export function useWebSocket({
   onStateUpdate,
   onMeetingSummary,
   onMeetingSummaryFailed,
+  onRecordingLocked,
+  onRecordingUnlocked,
   onReconnected,
   onError,
 }: UseWebSocketOptions) {
@@ -46,6 +50,8 @@ export function useWebSocket({
     onStateUpdate,
     onMeetingSummary,
     onMeetingSummaryFailed,
+    onRecordingLocked,
+    onRecordingUnlocked,
     onReconnected,
     onError,
   });
@@ -59,6 +65,8 @@ export function useWebSocket({
     onStateUpdate,
     onMeetingSummary,
     onMeetingSummaryFailed,
+    onRecordingLocked,
+    onRecordingUnlocked,
     onReconnected,
     onError,
   };
@@ -141,6 +149,12 @@ export function useWebSocket({
               break;
             case 'meeting.summary.failed':
               cbs.onMeetingSummaryFailed?.(data.data);
+              break;
+            case 'recording.locked':
+              cbs.onRecordingLocked?.();
+              break;
+            case 'recording.unlocked':
+              cbs.onRecordingUnlocked?.();
               break;
             default:
               console.log('Unknown event type:', data.type);
