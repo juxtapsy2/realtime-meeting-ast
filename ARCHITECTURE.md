@@ -418,6 +418,15 @@ never recorded can still produce a MOM from its documents alone. Only the
 extracted text is persisted for later generation; original files are discarded
 at upload time and the text is never returned by the API.
 
+The MOM output language is English or Vietnamese. Generation is triggered with
+`POST /api/meetings/:id/summary` and an optional `{"language":"en"|"vi"}`
+body (default English; the automatic end-of-meeting run always uses English).
+The prompt forces every output field into that language while identifiers,
+dates, and glossary terms stay verbatim, and the server stamps the stored
+summary with the language it requested — never the model's claim. An explicit
+regeneration overwrites an existing summary, which is how a meeting's MOM is
+switched between languages.
+
 LLM requests pass a proactive token-budget gate before they are sent: a shared
 per-API-key budget admits a request only when the estimated cost (prompt
 bytes/2.6, conservative for dense Vietnamese/English identifier-heavy text,

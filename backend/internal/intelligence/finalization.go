@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+// summaryLanguageName maps the MoM language code to the language name used in
+// prompts. The transport layer validates the code; anything other than "vi"
+// prompts as English, which is the default.
+func summaryLanguageName(language string) string {
+	if strings.EqualFold(strings.TrimSpace(language), "vi") {
+		return "Vietnamese"
+	}
+	return "English"
+}
+
 // finalizationPrompt is the shared finalization prompt for every provider.
 // Its output contract is deliberately narrow: the application renders the MOM
 // header line itself and reads only title/summary/mom_entries/key_points, so
@@ -28,7 +38,7 @@ func finalizationPrompt(glossary Glossary, input FinalizationInput) string {
 		transcript = "none"
 	}
 
-	return fmt.Sprintf(`You are an AI meeting assistant. Produce the Minutes of Meeting (MOM) for one meeting from the evidence below.
+	return fmt.Sprintf(`You are an AI meeting assistant. Produce the Minutes of Meeting (MOM) for one meeting from the evidence below. Write the MOM output in %s.
 
 Meeting title: %s
 
@@ -65,13 +75,14 @@ Rules:
 - "key_points": at most 5 bullets, at most 12 words each.
 - The transcript may be empty (the meeting was never recorded). In that case derive the MOM entirely from the meeting documents; when both are present, use the documents to complete what the transcript missed.
 - Use the regulated business glossary terms EXACTLY as written. Never guess or substitute similar-sounding words for glossary terms.
-- Preserve the speakers' original language. If the meeting mixed Vietnamese and English, keep that mix in each entry.
+- Write EVERY output field in %s: "title", "summary", each mom_entries "title"/"status"/"actions"/"assignee"/"eta", and "key_points". Keep identifiers, dates, glossary terms, and proper nouns exactly as written.
 - Ignore filler words and hesitations ("um", "uh", "ừ", "ờ", repetitions); they carry no meaning for the MOM.
 - Keep entries terse; no commentary outside the MOM format.
 
 Example:
 {"title":"Weekly sync","summary":"CR_002 budget approved; test plan still pending.","mom_entries":[{"id":"CR_002","title":"budget","status":"approved by Linh","actions":"publish the decision log, ETA: Friday","assignee":"Linh","eta":"Friday"}],"key_points":["CR_002 budget approved"]}`,
-		input.Title, glossary.PromptSection(), stateJSON, transcript, documents)
+		summaryLanguageName(input.Language), input.Title, glossary.PromptSection(), stateJSON, transcript, documents,
+		summaryLanguageName(input.Language))
 }
 
 // momSummaryFormat constrains Groq/OpenAI finalization output to exactly the
@@ -154,8 +165,8 @@ func chunkEntriesFormat() map[string]interface{} {
 
 // chunkExtractionPrompt asks for the MoM entries of one evidence chunk,
 // using the same entry contract as the full finalization prompt.
-func chunkExtractionPrompt(title string, glossary Glossary, chunkIndex, chunkCount int, chunk string) string {
-	return fmt.Sprintf(`You are an AI meeting assistant. Extract the Minutes of Meeting (MOM) entries from PART %d of %d of one meeting's evidence.
+func chunkExtractionPrompt(title string, glossary Glossary, language string, chunkIndex, chunkCount int, chunk string) string {
+	return fmt.Sprintf(`You are an AI meeting assistant. Extract the Minutes of Meeting (MOM) entries from PART %d of %d of one meeting's evidence. Write the extracted entries in %s.
 
 Meeting title: %s
 
@@ -172,10 +183,11 @@ Entry rules (same as the full MOM template):
 - "actions": the NEXT ACTIONS as a single line; "" when none. Put who is responsible in "assignee" and the ETA in "eta" when mentioned.
 - "key_points": at most 3 short bullets for this part.
 - Use regulated business glossary terms EXACTLY as written.
-- Preserve the speakers' original language (Vietnamese/English mix stays as spoken).
+- Write every output field ("title", "status", "actions", "assignee", "eta", "key_points") in %s. Keep identifiers, dates, glossary terms, and proper nouns exactly as written.
 - Ignore filler words and hesitations ("um", "uh", "ừ", "ờ", repetitions).
 - Output one JSON object with "mom_entries" and "key_points" and nothing else. No markdown fences.`,
-		chunkIndex, chunkCount, title, glossary.PromptSection(), chunkIndex, chunkCount, chunk)
+		chunkIndex, chunkCount, summaryLanguageName(language), title, glossary.PromptSection(), chunkIndex, chunkCount, chunk,
+		summaryLanguageName(language))
 }
 
 // parseChunkEntries parses one map-step response.
@@ -197,13 +209,13 @@ func parseChunkEntries(response string) (entries []MOMEntry, keyPoints []string,
 // mergePrompt assembles the final single-call MoM request from the entries
 // extracted per chunk; the merged payload is far smaller than the raw
 // evidence, so it fits the provider's per-request cap.
-func mergePrompt(title string, glossary Glossary, entries []MOMEntry, keyPoints []string) string {
+func mergePrompt(title string, glossary Glossary, language string, entries []MOMEntry, keyPoints []string) string {
 	entriesJSON, _ := json.Marshal(entries)
 	keyJSON, _ := json.Marshal(keyPoints)
 	if title == "" {
 		title = "(unknown)"
 	}
-	return fmt.Sprintf(`You are an AI meeting assistant. Produce the final Minutes of Meeting (MOM) JSON for one meeting by merging the pre-extracted entries below. All evidence has already been reviewed; do not drop entries.
+	return fmt.Sprintf(`You are an AI meeting assistant. Produce the final Minutes of Meeting (MOM) JSON for one meeting by merging the pre-extracted entries below. All evidence has already been reviewed; do not drop entries. Write the merged MOM in %s.
 
 Meeting title: %s
 
@@ -228,11 +240,13 @@ Rules:
 - "title": the meeting title above; when empty, a short factual title from the entries.
 - "summary": one or two sentences on the meeting outcome.
 - "key_points": at most 5 bullets, at most 12 words each.
+- Write EVERY output field in %s: "title", "summary", each mom_entries "title"/"status"/"actions"/"assignee"/"eta", and "key_points". Keep identifiers, dates, glossary terms, and proper nouns exactly as written.
 - Keep entries terse; no commentary outside the MOM format.
 
 Example:
 {"title":"Weekly sync","summary":"CR_002 budget approved; test plan still pending.","mom_entries":[{"id":"CR_002","title":"budget","status":"approved by Linh","actions":"publish the decision log, ETA: Friday","assignee":"Linh","eta":"Friday"}],"key_points":["CR_002 budget approved"]}`,
-		title, glossary.PromptSection(), string(entriesJSON), string(keyJSON))
+		summaryLanguageName(language), title, glossary.PromptSection(), string(entriesJSON), string(keyJSON),
+		summaryLanguageName(language))
 }
 
 // parseFinalizationJSON converts a provider response into a MeetingSummary.

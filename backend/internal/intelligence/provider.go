@@ -159,6 +159,9 @@ type FinalizationInput struct {
 	FinalState   *MeetingState `json:"final_state"`
 	Title        string        `json:"title,omitempty"`
 	Glossary     Glossary      `json:"-"`
+	// Language is the MoM output language: "en" (default) or "vi". It is
+	// validated at the transport layer; anything else prompts as English.
+	Language string `json:"-"`
 }
 
 // MOMEntry is one item in the "current status → next actions" minutes-of-meeting
@@ -184,6 +187,10 @@ type MeetingSummary struct {
 	Questions    []OpenQuestion `json:"questions"`
 	Participants []string       `json:"participants,omitempty"`
 	Duration     float64        `json:"duration,omitempty"`
+	// Language records the MoM output language the summary was generated
+	// in ("en" or "vi"). It is stamped by the server after parsing, never
+	// trusted from the model.
+	Language string `json:"language,omitempty"`
 }
 
 // Provider represents the type of intelligence provider

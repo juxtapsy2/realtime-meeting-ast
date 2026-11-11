@@ -45,9 +45,19 @@ export async function fetchMeeting(id: number): Promise<Meeting> {
   return data.meeting;
 }
 
-export async function regenerateSummary(meetingId: number): Promise<void> {
+// MoM output language: English (default) or Vietnamese.
+export type MomLanguage = 'en' | 'vi';
+
+// Starts background summary generation in the given language. The server
+// overwrites an existing summary when the user explicitly regenerates.
+export async function regenerateSummary(
+  meetingId: number,
+  language: MomLanguage = 'en',
+): Promise<void> {
   const response = await fetch(`${API_BASE}/meetings/${meetingId}/summary`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language }),
   });
   if (!response.ok) {
     throw new Error(await readError(response, 'Failed to start summary generation'));

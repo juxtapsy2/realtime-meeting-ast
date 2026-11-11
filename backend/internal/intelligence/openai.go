@@ -119,7 +119,7 @@ func (o *OpenAIIntelligence) finalizeChunked(ctx context.Context, input Finaliza
 	var allEntries []MOMEntry
 	var allKeyPoints []string
 	for i, chunk := range chunks {
-		prompt := chunkExtractionPrompt(input.Title, o.glossary, i+1, len(chunks), chunk)
+		prompt := chunkExtractionPrompt(input.Title, o.glossary, input.Language, i+1, len(chunks), chunk)
 		response, err := o.callLLM(ctx, prompt, chunkEntriesFormat())
 		if err != nil {
 			return MeetingSummary{}, fmt.Errorf("failed to call LLM for chunk %d/%d: %w", i+1, len(chunks), err)
@@ -132,7 +132,7 @@ func (o *OpenAIIntelligence) finalizeChunked(ctx context.Context, input Finaliza
 		allKeyPoints = append(allKeyPoints, keyPoints...)
 	}
 
-	response, err := o.callLLM(ctx, mergePrompt(input.Title, o.glossary, allEntries, allKeyPoints), momSummaryFormat())
+	response, err := o.callLLM(ctx, mergePrompt(input.Title, o.glossary, input.Language, allEntries, allKeyPoints), momSummaryFormat())
 	if err != nil {
 		return MeetingSummary{}, fmt.Errorf("failed to call LLM for merge: %w", err)
 	}

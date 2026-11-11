@@ -146,3 +146,38 @@ func TestSummaryFailureMessage(t *testing.T) {
 		})
 	}
 }
+
+// The transport validates the MoM language through this helper: empty and
+// "en" default to English, "vi" selects Vietnamese, anything else must be
+// rejected instead of silently generating the wrong language.
+func TestNormalizeSummaryLanguage(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: "en"},
+		{in: "en", want: "en"},
+		{in: " EN ", want: "en"},
+		{in: "vi", want: "vi"},
+		{in: "VI", want: "vi"},
+		{in: "fr", wantErr: true},
+		{in: "vietnamese", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := normalizeSummaryLanguage(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("normalizeSummaryLanguage(%q) should fail", tt.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("normalizeSummaryLanguage(%q) unexpected error: %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("normalizeSummaryLanguage(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
