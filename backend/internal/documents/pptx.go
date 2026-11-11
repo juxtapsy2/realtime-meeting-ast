@@ -2,6 +2,7 @@ package documents
 
 import (
 	"archive/zip"
+	"errors"
 	"regexp"
 	"sort"
 	"strconv"
@@ -50,7 +51,9 @@ func partNames(zr *zip.Reader, dir string) []string {
 
 // extractPptx returns every slide in slide order, followed by the speaker
 // notes. The shared paragraph decoder handles a:p/a:t runs; relationship
-// parts are skipped, and an archive with no readable text maps to ErrNoText.
+// parts are skipped. Parts with no text (blank slides, empty notes
+// placeholders) are skipped rather than failing the deck, and an archive
+// with no readable text at all maps to ErrNoText.
 func extractPptx(zr *zip.Reader) (string, error) {
 	names := append(partNames(zr, "ppt/slides/"), partNames(zr, "ppt/notesSlides/")...)
 	if len(names) == 0 {
@@ -71,6 +74,9 @@ func extractPptx(zr *zip.Reader) (string, error) {
 		}
 		text, err := decodeParagraphs(rc, name)
 		rc.Close()
+		if errors.Is(err, ErrNoText) {
+			continue
+		}
 		if err != nil {
 			return "", err
 		}

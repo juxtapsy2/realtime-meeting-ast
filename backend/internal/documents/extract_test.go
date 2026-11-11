@@ -164,6 +164,43 @@ func TestExtractPptx(t *testing.T) {
 	}
 }
 
+func TestExtractPptxSkipsEmptyParts(t *testing.T) {
+	slide := func(body string) string {
+		return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+<p:cSld><p:sp><p:txBody>` + body + `</p:txBody></p:sp></p:cSld></p:sld>`
+	}
+	emptyNotes := `<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree/></p:cSld></p:notes>`
+
+	// Blank slides and placeholder-only notes are common in real decks; they
+	// must not abort extraction of the slides that do have text.
+	doc, err := Extract("deck.pptx", zipBytes(t, map[string]string{
+		"ppt/presentation.xml":            `<p:presentation/>`,
+		"ppt/slides/slide1.xml":           slide(`<a:p><a:r><a:t>Agenda</a:t></a:r></a:p>`),
+		"ppt/slides/slide2.xml":           slide(``), // image-only / blank slide
+		"ppt/slides/slide3.xml":           slide(`<a:p><a:r><a:t>Decide on CR_002</a:t></a:r></a:p>`),
+		"ppt/notesSlides/notesSlide1.xml": emptyNotes,
+	}))
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	want := "Agenda\n\nDecide on CR_002"
+	if doc.Text != want {
+		t.Errorf("Text = %q, want %q", doc.Text, want)
+	}
+}
+
+func TestExtractPptxWithOnlyEmptyParts(t *testing.T) {
+	_, err := Extract("blank.pptx", zipBytes(t, map[string]string{
+		"ppt/presentation.xml":            `<p:presentation/>`,
+		"ppt/slides/slide1.xml":           `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree/></p:cSld></p:sld>`,
+		"ppt/notesSlides/notesSlide1.xml": `<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree/></p:cSld></p:notes>`,
+	}))
+	if !errors.Is(err, ErrNoText) {
+		t.Fatalf("err = %v, want ErrNoText", err)
+	}
+}
+
 func TestExtractPptxWithoutSlides(t *testing.T) {
 	_, err := Extract("empty.pptx", zipBytes(t, map[string]string{
 		"ppt/presentation.xml": `<p:presentation/>`,
