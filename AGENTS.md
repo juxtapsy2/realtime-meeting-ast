@@ -738,20 +738,35 @@ When introducing an architectural boundary, update relevant architectural docume
 
 # 29. Git Rules
 
-AI agents must not perform repository history operations unless explicitly requested.
+Completed and validated work is committed and delivered as a pull request by default.
+The user reviews and merges; agents never merge their own PRs.
 
-Do not automatically:
+When a task is complete (section 35), the default flow is:
 
 ```text
-git commit
-git push
+create a dedicated branch agent/<short-task-slug>
+    ↓
+stage only the files this task changed
+    ↓
+commit with a concise message
+    ↓
+push the branch and open a PR against main
+```
+
+Never:
+
+```text
+git commit to main
+git push to main
 git merge
 git rebase
 git reset
 git tag
+force-push, amend, or revert another agent's or the user's commits
 ```
 
-The user controls version history.
+The user controls version history. If the user asks for different history handling (including
+"do not commit"), follow the user's instruction over the default flow.
 
 Agents may inspect:
 
@@ -767,8 +782,7 @@ Never discard user changes.
 
 ## 29.1 Branch Isolation
 
-When several agents run in parallel, each in its own terminal against the same checkout.
-When the user has asked for commits or pull requests:
+When several agents run in parallel, each in its own terminal against the same checkout:
 
 ```text
 never commit to main
@@ -788,8 +802,8 @@ Rules:
 * Stage only files you changed. Never `git add -A` or revert/overwrite another agent's or the
   user's uncommitted work to get a clean tree.
 * Deliver work through a PR instead of merging into `main` yourself; the user reviews and merges.
-* Commit/PR operations still require an explicit request as per the rules above — this section
-  defines *where* the work goes once that request is made, not permission to commit on its own.
+* Commit on task completion by default — no separate request needed. Do not commit while
+  validation is failing or the task is half-done; section 35 still applies first.
 
 ---
 
